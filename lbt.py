@@ -367,11 +367,8 @@ def write_lbt_readme_file(file_base: str, targets: pd.DataFrame) -> str:
     readme = Table()
     readme["Target Name"] = targets["target_name"]
     readme["ra"] = targets["ra"]
-    readme["RA"] = [Angle(ra, unit=u.deg).to_string(unit=u.hour, decimal=False, precision=2, sep=":") for ra in targets["ra"]]
-    readme["DEC"] = [
-        Angle(dec, unit=u.deg).to_string(unit=u.deg, decimal=False, precision=2, sep=":", alwayssign=True)
-        for dec in targets["dec"]
-    ]
+    readme["RA"] = targets["RA"]
+    readme["Dec"] = targets["Dec"]
     readme["Vmag"] = targets["Vmag"]
     readme["Teff"] = targets["Teff"]
     readme["Fiber"] = targets["pepsi_fiber"]
@@ -388,8 +385,9 @@ def write_lbt_readme_file(file_base: str, targets: pd.DataFrame) -> str:
     readme.sort("ra")
     readme.remove_column("ra")
 
+
     # save target list as csv
-    readme.write(file_base + ".csv")
+    readme.write(file_base + ".csv", overwrite=True)
 
     # make the readme file by prepending/appending the header/footer info
     readme_header = open(file_base + ".README.header", "r").readlines()

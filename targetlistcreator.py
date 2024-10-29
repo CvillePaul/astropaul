@@ -1,5 +1,9 @@
 import pandas as pd
-
+import astroplan as ap
+from astropy.coordinates import SkyCoord, Angle
+from astropy.time import Time
+import astropy.units as u
+import numpy as np
 
 class TargetListCreator:
     def __init__(self, **kwargs):
@@ -10,13 +14,15 @@ class TargetListCreator:
         else:
             self.steps = []
 
-    def calculate(self, initial_df: pd.DataFrame = None, **kwargs) -> pd.DataFrame:
+    def calculate(self, initial_df: pd.DataFrame = None, steps=None, **kwargs) -> pd.DataFrame:
         """
         Create a new target list by running through self.steps and returning the result
         """
         intermediate_df = pd.DataFrame() if initial_df is None else initial_df
         merged_kwargs = {**self.kwargs, **kwargs}
-        for step in self.steps:
+        if steps is None:
+            steps = self.steps
+        for step in steps:
             intermediate_df = step(intermediate_df, **merged_kwargs)
         return intermediate_df
 
@@ -34,18 +40,14 @@ def add_targets(df: pd.DataFrame, column_prefix="target_", **kwargs) -> pd.DataF
         kwargs["connection"],
         index_col="id",
     )
-    new_column_names = {
-        column: f"{column_prefix}{column}" for column in targets.columns
-    }
+    new_column_names = {column: f"{column_prefix}{column}" for column in targets.columns}
     targets.rename(columns=new_column_names, inplace=True)
     return targets
 
 
 def add_speckle(df: pd.DataFrame, column_prefix="speckle_", **kwargs) -> pd.DataFrame:
     count_column = f"{column_prefix}count"
-    speckle = pd.read_sql(
-        "select * from tom_specklerawdata;", kwargs["connection"], index_col="target_id"
-    )
+    speckle = pd.read_sql("select * from tom_specklerawdata;", kwargs["connection"], index_col="target_id")
     speckle = speckle.groupby("target_id").id.agg(foo="count")
     speckle.rename(columns={"foo": count_column}, inplace=True)
     df = df.join(speckle)
@@ -94,7 +96,7 @@ def add_lists(df: pd.DataFrame, column_prefix="list_", **kwargs) -> pd.DataFrame
 def add_ephemerides(df: pd.DataFrame, column_prefix="ephem_", **kwargs) -> pd.DataFrame:
     ephem = pd.read_sql(
         """
-        select t.id, bp.member, bp.period, bp.t0_a, bp.duration_a, bp.depth_a, bp.t0_b, bp.duration_b, bp.depth_b
+        select t.id, bp.system, bp.member, bp.period, bp.t0, bp.duration, bp.depth
         from tom_binaryparameters bp
         join tom_scienceresult sr on sr.id = bp.scienceresult_ptr_id
         join tom_target t on t.id = sr.target_id
@@ -102,6 +104,8 @@ def add_ephemerides(df: pd.DataFrame, column_prefix="ephem_", **kwargs) -> pd.Da
         kwargs["connection"],
         index_col="id",
     )
+    ephem["period"] = ephem["period"] / 3600 / 24 # convert from seconds to days for convenience
+    ephem["duration"] = ephem["duration"] / 3600 #/ 24 # convert from seconds to hours for convenience
     new_column_names = {column: f"{column_prefix}{column}" for column in ephem.columns}
     ephem.rename(columns=new_column_names, inplace=True)
     df = df.join(ephem)
@@ -140,6 +144,12 @@ def add_coords(df: pd.DataFrame, **kwargs) -> pd.DataFrame:
     if "tess_version" in df.columns:
         for field, tess_field in tess_mapping.items():
             df[field] = df[tess_field]
+    # add sexagesimal versions of the coordinates for convenience
+    df["RA"] = [Angle(ra, unit=u.deg).to_string(unit=u.hour, decimal=False, precision=2, sep=":") for ra in df["ra"]]
+    df["Dec"] = [
+        Angle(dec, unit=u.deg).to_string(unit=u.deg, decimal=False, precision=2, sep=":", alwayssign=True)
+        for dec in df["dec"]
+    ]
     return df
 
 
@@ -150,6 +160,45 @@ def hide_cols(df: pd.DataFrame, **kwargs) -> pd.DataFrame:
         cols_to_remove += prefix_cols
     if len(cols_to_remove) > 0:
         df.drop(labels=cols_to_remove, axis=1, inplace=True)
+    return df
+
+
+def add_observability(
+    df: pd.DataFrame,
+    observer: ap.Observer,
+    time_segment: tuple[Time, Time], # if more than a day apart, calculates observing nights during given range 
+    constraints: list[ap.Constraint] = None,
+    column_prefix: str = "",
+    **kwargs,
+) -> pd.DataFrame:
+    if constraints is None:
+        constraints = [
+            ap.AltitudeConstraint(30 * u.deg, 80 * u.deg),
+            ap.AirmassConstraint(2),
+            # ap.AtNightConstraint.twilight_civil(),
+        ]
+    targets = ap.FixedTarget(coord=SkyCoord(ra=df["ra"].values * u.deg, dec=df["dec"].values * u.deg))
+    # astroplan needs a contiguous range of time to test observability
+    # break given range into observing nights & test separately, combining results
+    beg_time, end_time = time_segment
+    sample_intervals = [] # list of tuples of time range(s) to test
+    if (end_time - beg_time) > 1 * u.day:
+        curr_time = beg_time
+        term_time = observer.sun_rise_time(end_time, which="next")
+        while curr_time < term_time:
+            beg_night = observer.sun_set_time(curr_time, which="nearest")
+            end_night = observer.sun_rise_time(beg_night, which="next")
+            sample_intervals.append((beg_night, end_night))
+            curr_time += 1 * u.day
+    else:
+        sample_intervals = [time_segment]
+    
+    observability = np.array([False] * len(df))
+    for sample_interval in sample_intervals:
+        print(sample_interval[0].iso, sample_interval[1].iso)
+        interval_observability = np.array(ap.is_observable(constraints, observer, targets, sample_interval))
+        observability |= interval_observability
+    df[f"{column_prefix}observable"] = observability
     return df
 
 
