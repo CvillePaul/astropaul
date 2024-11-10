@@ -169,6 +169,7 @@ def add_observability(
     time_segment: tuple[Time, Time], # if more than a day apart, calculates observing nights during given range 
     constraints: list[ap.Constraint] = None,
     column_prefix: str = "",
+    calc_max_alt: bool = False,
     **kwargs,
 ) -> pd.DataFrame:
     if constraints is None:
@@ -195,7 +196,6 @@ def add_observability(
     
     observability = np.array([False] * len(df))
     for sample_interval in sample_intervals:
-        print(sample_interval[0].iso, sample_interval[1].iso)
         interval_observability = np.array(ap.is_observable(constraints, observer, targets, sample_interval))
         observability |= interval_observability
     df[f"{column_prefix}observable"] = observability
