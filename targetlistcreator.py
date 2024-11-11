@@ -19,19 +19,13 @@ class TargetList:
         self.colum_groups = column_groups or {}
         self.other_lists = other_lists or {}
 
-    # def add(
-    #     self,
-    #     target_list: pd.DataFrame = pd.DataFrame(),
-    #     column_groups: dict[str, tuple[list[str], list[str]]] = {},
-    #     other_lists: dict[str, pd.DataFrame] = {},
-    # ):
-    #     if self.target_list.empty or self.target_list is None:
-    #         self.target_list = target_list
-    #     else:
-    #         self.target_list = self.target_list.join(target_list)
-    #     self.colum_groups = {**self.colum_groups, **column_groups}
-    #     for name, other_list in other_lists.items():
-    #         self.other_lists[name] = other_list
+    def copy(self) -> "TargetList":
+        answer = TargetList(
+            self.target_list.copy(),
+            self.colum_groups.copy(),
+            {key: value.copy() for key, value in self.other_lists.items()},
+        )
+        return answer
 
     @classmethod
     def merge(
@@ -51,10 +45,6 @@ class TargetList:
         for name, other_list in other_lists.items():
             answer.other_lists[name] = other_list
         return answer
-
-    @classmethod
-    def copy(cls, other: "TargetList") -> "TargetList":
-        return TargetList(other.target_list, other.colum_groups, other.other_lists)
 
 
 class TargetListCreator:
@@ -159,7 +149,7 @@ def add_lists(tl: TargetList, column_prefix="List ", **kwargs) -> TargetList:
             ).fetchall()
         ]
         column_name = f'{column_prefix}{target_list.replace(" ", "_").capitalize()}'
-        answer = TargetList.copy(tl)
+        answer = tl.copy()
         # TODO: remove hard-coded column name in following line
         answer.target_list[column_name] = answer.target_list["Target Name"].isin(list_members)
     return answer
@@ -180,7 +170,7 @@ def add_ephemerides(tl: TargetList, column_prefix="Ephem ", **kwargs) -> TargetL
     ephem["duration"] = ephem["duration"] / 3600  # convert from seconds to hours for convenience
     new_column_names = {column: f"{column_prefix}{column.capitalize()}" for column in ephem.columns}
     ephem.rename(columns=new_column_names, inplace=True)
-    answer = TargetList.copy(tl)
+    answer = tl.copy()
     answer.other_lists[column_prefix.strip().replace("_", "")] = ephem
     return answer
 
@@ -218,7 +208,7 @@ def add_coords(tl: TargetList, **kwargs) -> TargetList:
         "Vmag": "TESS Vmag",
         "Teff": "TESS Teff",
     }
-    answer = TargetList.copy(tl)
+    answer = tl.copy()
     if "TESS version" in answer.target_list.columns:
         for field, tess_field in tess_mapping.items():
             answer.target_list[field] = answer.target_list[tess_field]
@@ -230,12 +220,15 @@ def add_coords(tl: TargetList, **kwargs) -> TargetList:
         Angle(dec, unit=u.deg).to_string(unit=u.deg, decimal=False, precision=2, sep=":", alwayssign=True)
         for dec in answer.target_list["dec"]
     ]
-    answer.colum_groups = {**answer.colum_groups, "Coordinates": (list(tess_mapping.keys()), [])}
+    answer.colum_groups = {
+        **answer.colum_groups,
+        "Coordinates": (["RA", "Dec", "ra", "dec", "Vmag", "Teff"], ["pmra", "pmdec", "parallax"]),
+    }
     return answer
 
 
 def hide_cols(tl: TargetList, **kwargs) -> TargetList:
-    answer = TargetList.copy(tl)
+    answer = tl.copy()
     if prefix := kwargs.get("prefix"):
         cols_to_remove = [col for col in tl.target_list.columns if col.startswith(prefix)]
         if len(cols_to_remove) > 0:
@@ -276,7 +269,7 @@ def add_observability(
         sample_intervals = [time_segment]
 
     # calculate observability for each nightly time range
-    answer = TargetList.copy(tl)
+    answer = tl.copy()
     overall_observability = np.array([False] * len(answer.target_list))
     overall_max_alts = np.array([-90.0] * len(answer.target_list))
     nightly_columns = []
@@ -302,7 +295,7 @@ def add_observability(
         max_alt_column = f"{column_prefix}Max Alt"
         answer.target_list[max_alt_column] = overall_max_alts
         main_columns.append(max_alt_column)
-    answer.colum_groups[column_prefix.strip()] = ([main_columns], [nightly_columns])
+    answer.colum_groups[column_prefix.strip()] = (main_columns, nightly_columns)
     return answer
 
 
@@ -311,6 +304,6 @@ def filter_targets(
     criteria=True,
     **kwargs,
 ) -> TargetList:
-    answer = TargetList.copy(tl)
+    answer = tl.copy()
     answer.target_list = answer.target_list[criteria]
     return answer
