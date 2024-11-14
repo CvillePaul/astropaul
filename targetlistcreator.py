@@ -8,6 +8,49 @@ import astropy.units as u
 import numpy as np
 
 
+class ObservingSession:
+    def __init__(
+        self,
+        observer: ap.Observer,
+        observing_segments: list[tuple[Time, Time]] = [],
+    ):
+        self.observer = observer
+        self.observing_segments = observing_segments
+
+    def _determine_nighttime(night: Time) -> tuple[Time, Time]:
+        pass
+
+    def add_full_day(self, day_spec: str):
+        self.observing_segments.append(self._determine_nighttime(day_spec))
+
+    def add_half_day(self, day_spec: str, first_half: bool = True):
+        beg, end = self._determine_nighttime(day_spec)
+        mid = (end - beg) / 2
+        if first_half:
+            self.observing_segments.append((beg, mid))
+        else:
+            self.observing_segments.append((mid, end))
+
+    def add_day_range(self, beg_spec: str, end_spec: str):
+        pass
+
+    # # astroplan needs a contiguous range of time to test observability
+    # # break given range(s) into observing nights & test separately, combining results
+    # sample_intervals = []  # list of tuples of time range(s) to test
+    # for time_segment in time_segments:
+    #     beg_time, end_time = time_segment
+    #     if (end_time - beg_time) > 1 * u.day:
+    #         curr_time = beg_time
+    #         term_time = observer.sun_rise_time(end_time, which="next")
+    #         while curr_time < term_time:
+    #             beg_night = observer.sun_set_time(curr_time, which="nearest")
+    #             end_night = observer.sun_rise_time(beg_night, which="next")
+    #             sample_intervals.append((beg_night, end_night))
+    #             curr_time += 1 * u.day
+    #     else:
+    #         sample_intervals.append(time_segment)
+
+
 class TargetList:
     def __init__(
         self,
@@ -83,7 +126,7 @@ def add_targets(tl: TargetList = TargetList(), column_prefix="Target ", **kwargs
     )
     new_column_names = {column: f"{column_prefix}{column.capitalize()}" for column in targets.columns}
     targets.rename(columns=new_column_names, inplace=True)
-    column_groups = {"Target": (["Name"], ["Source", "Type"])}
+    column_groups = {"Target": ([f"{column_prefix}Name"], [f"{column_prefix}Source", f"{column_prefix}Type"])}
     return TargetList.merge(tl, targets, column_groups, {})
 
 
@@ -134,7 +177,9 @@ def add_spectra(tl: TargetList, column_prefix="PEPSI ", **kwargs) -> TargetList:
 
 def add_lists(tl: TargetList, column_prefix="List ", **kwargs) -> TargetList:
     conn = kwargs["connection"]
-    for (target_list,) in conn.execute("select name from tom_targetlist;").fetchall():
+    list_names = [name[0] for name in conn.execute("select name from tom_targetlist;").fetchall()]
+    answer = tl.copy()
+    for target_list in list_names:
         list_members = [
             result[0]
             for result in conn.execute(
@@ -148,10 +193,11 @@ def add_lists(tl: TargetList, column_prefix="List ", **kwargs) -> TargetList:
                 [target_list],
             ).fetchall()
         ]
-        column_name = f'{column_prefix}{target_list.replace(" ", "_").capitalize()}'
-        answer = tl.copy()
+        column_name = f"{column_prefix}{target_list}"
+        # column_name = f'{column_prefix}{target_list.replace(" ", "_").capitalize()}'
         # TODO: remove hard-coded column name in following line
         answer.target_list[column_name] = answer.target_list["Target Name"].isin(list_members)
+        answer.colum_groups[column_prefix] = ([], [f"{column_prefix}{name}" for name in list_names])
     return answer
 
 
@@ -189,10 +235,10 @@ def add_tess(tl: TargetList, column_prefix="TESS ", **kwargs) -> TargetList:
     tess.drop("id", axis=1, inplace=True)
     new_column_names = {column: f"{column_prefix}{column}" for column in tess.columns}
     tess.rename(columns=new_column_names, inplace=True)
-    identifier_column = f"{column_prefix}Identifier"
+    objId_column = f"{column_prefix}objID"
     columns = list(new_column_names.values())
-    columns.remove(identifier_column)
-    column_groups = {column_prefix: ([identifier_column], columns)}
+    columns.remove(objId_column)
+    column_groups = {column_prefix: ([objId_column], columns)}
     return TargetList.merge(tl, tess, column_groups, {})
 
 
@@ -214,10 +260,11 @@ def add_coords(tl: TargetList, **kwargs) -> TargetList:
             answer.target_list[field] = answer.target_list[tess_field]
     # add sexagesimal versions of the coordinates for convenience
     answer.target_list["RA"] = [
-        Angle(ra, unit=u.deg).to_string(unit=u.hour, decimal=False, precision=2, sep=":") for ra in answer.target_list["ra"]
+        Angle(ra, unit=u.deg).to_string(unit=u.hour, decimal=False, precision=2, sep=":", pad=True)
+        for ra in answer.target_list["ra"]
     ]
     answer.target_list["Dec"] = [
-        Angle(dec, unit=u.deg).to_string(unit=u.deg, decimal=False, precision=2, sep=":", alwayssign=True)
+        Angle(dec, unit=u.deg).to_string(unit=u.deg, decimal=False, precision=2, sep=":", alwayssign=True, pad=True)
         for dec in answer.target_list["dec"]
     ]
     answer.colum_groups = {
@@ -240,7 +287,7 @@ def hide_cols(tl: TargetList, **kwargs) -> TargetList:
 def add_observability(
     tl: TargetList,
     observer: ap.Observer,
-    time_segment: tuple[Time, Time],  # if more than a day apart, calculates observing nights during given range
+    time_segments: list[tuple[Time, Time]],
     constraints: list[ap.Constraint] = None,
     column_prefix: str = "Observable ",
     calc_max_altitude: bool = False,
@@ -248,25 +295,25 @@ def add_observability(
 ) -> TargetList:
     if constraints is None:
         constraints = [
-            ap.AltitudeConstraint(30 * u.deg, 80 * u.deg),
+            ap.AltitudeConstraint(30 * u.deg, 80 * u.deg, True),
             ap.AirmassConstraint(2),
         ]
     coords = SkyCoord(ra=tl.target_list["ra"].values * u.deg, dec=tl.target_list["dec"].values * u.deg)
-    targets = ap.FixedTarget(coord=coords)
     # astroplan needs a contiguous range of time to test observability
-    # break given range into observing nights & test separately, combining results
-    beg_time, end_time = time_segment
+    # break given range(s) into observing nights & test separately, combining results
     sample_intervals = []  # list of tuples of time range(s) to test
-    if (end_time - beg_time) > 1 * u.day:
-        curr_time = beg_time
-        term_time = observer.sun_rise_time(end_time, which="next")
-        while curr_time < term_time:
-            beg_night = observer.sun_set_time(curr_time, which="nearest")
-            end_night = observer.sun_rise_time(beg_night, which="next")
-            sample_intervals.append((beg_night, end_night))
-            curr_time += 1 * u.day
-    else:
-        sample_intervals = [time_segment]
+    for time_segment in time_segments:
+        beg_time, end_time = time_segment
+        if (end_time - beg_time) > 1 * u.day:
+            curr_time = beg_time
+            term_time = observer.sun_rise_time(end_time, which="next")
+            while curr_time < term_time:
+                beg_night = observer.sun_set_time(curr_time, which="nearest")
+                end_night = observer.sun_rise_time(beg_night, which="next")
+                sample_intervals.append((beg_night, end_night))
+                curr_time += 1 * u.day
+        else:
+            sample_intervals.append(time_segment)
 
     # calculate observability for each nightly time range
     answer = tl.copy()
@@ -274,7 +321,7 @@ def add_observability(
     overall_max_alts = np.array([-90.0] * len(answer.target_list))
     nightly_columns = []
     for sample_interval in sample_intervals:
-        interval_observability = np.array(ap.is_observable(constraints, observer, targets, sample_interval))
+        interval_observability = np.array(ap.is_observable(constraints, observer, coords, sample_interval))
         column_name = f"{column_prefix}{sample_interval[0].iso[:10]}"
         answer.target_list[column_name] = interval_observability
         overall_observability |= interval_observability
