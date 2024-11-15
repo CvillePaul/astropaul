@@ -1,7 +1,7 @@
 import collections
 import datetime
 import platform
-from typing import Dict, Any, Tuple, List
+from typing import Any
 
 import astroplan as ap
 from astropy.coordinates import SkyCoord, Angle, get_body
@@ -16,27 +16,46 @@ class ObservingSession:
     def __init__(
         self,
         observer: ap.Observer,
-        observing_segments: List[Tuple[Time, Time]] = [],
+        observing_segments: list[tuple[Time, Time]] = [],
     ):
         self.observer = observer
         self.observing_segments = observing_segments
 
-    def _determine_nighttime(night: Time) -> Tuple[Time, Time]:
-        pass
+    def __repr__(self):
+        if self.observer.name:
+            answer = f"{self.observer.name}"
+        else:
+            answer = f"Site ({self.observer.latitude.value:.3f}, {self.observer.longitude.value:.3f})"
+        answer += f" in {self.observer.timezone}\n"
+        if self.observing_segments:
+            for beg, end in self.observing_segments:
+                answer += f"    {beg.iso[:19]} to {end.iso[:19]}\n"
+        else:
+            answer += "No observing segments defined\n"
+        return answer
 
-    def add_full_day(self, day_spec: str):
-        self.observing_segments.append(self._determine_nighttime(day_spec))
+    def _determine_nighttime(self, night: Time) -> tuple[Time, Time]:
+        beg_night = self.observer.sun_set_time(night, which="nearest")
+        end_night = self.observer.sun_rise_time(beg_night, which="next")
+        return (beg_night, end_night)
 
-    def add_half_day(self, day_spec: str, first_half: bool = True):
-        beg, end = self._determine_nighttime(day_spec)
-        mid = (end - beg) / 2
+    def add_full_day(self, day: str | Time):
+        self.observing_segments.append(self._determine_nighttime(Time(day)))
+
+    def add_half_day(self, day: str | Time, first_half: bool = True):
+        beg, end = self._determine_nighttime(day)
+        mid = Time(beg.jd + ((end.jd - beg.jd) / 2), format="jd")
         if first_half:
             self.observing_segments.append((beg, mid))
         else:
             self.observing_segments.append((mid, end))
 
-    def add_day_range(self, beg_spec: str, end_spec: str):
-        pass
+    def add_day_range(self, range: tuple[str, str] | tuple[Time, Time]):
+        beg, end = Time(range[0]), Time(range[1])
+        day = beg
+        while day < end:
+            self.add_full_day(day)
+            day += 1 * u.day
 
     # # astroplan needs a contiguous range of time to test observability
     # # break given range(s) into observing nights & test separately, combining results
@@ -81,7 +100,7 @@ class TargetList:
         pass
 
     def addOther(self, name: str, other: pd.DataFrame):
-        self.other_lists.add(name, other)
+        self.other_lists[name] = other
 
     def summarize(self) -> str:
         answer = f"{self.name}\n"
@@ -303,7 +322,7 @@ def add_ephemerides(tl: TargetList, column_prefix="Ephem ", **kwargs) -> TargetL
     new_column_names = {column: f"{column_prefix}{column.capitalize()}" for column in ephem.columns}
     ephem.rename(columns=new_column_names, inplace=True)
     answer = tl.copy()
-    answer.other_lists[column_prefix.strip().replace("_", "")] = ephem
+    answer.addOther(column_prefix.strip().replace("_", ""), ephem)
     return answer
 
 
@@ -454,7 +473,7 @@ def add_observability(
     moon_phases = pd.DataFrame()
     moon_phases["Time"] = [beg.iso[:10] for beg, _ in sample_intervals]
     moon_phases["Phase"] = [ap.moon_illumination(t) for t, _ in sample_intervals]
-    answer.other_lists["Lunar Phases"] = moon_phases
+    answer.addOther("Lunar Phases", moon_phases)
     return answer
 
 
