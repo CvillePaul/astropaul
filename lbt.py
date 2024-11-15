@@ -337,55 +337,73 @@ def pepsi_exptime(
     return np.round(exptime, 1)
 
 
-def add_pepsi_params(
-    df: pd.DataFrame, fiber: str, cd_blue: int, cd_red: int, snr: int, binocular: bool = False, **kwargs
-) -> pd.DataFrame:
-    df["pepsi_fiber"] = fiber
-    df["pepsi_cd_blue"] = cd_blue
-    df["pepsi_cd_blue_num_exp"] = 1
-    df["pepsi_cd_red"] = cd_red
-    df["pepsi_cd_red_num_exp"] = 1
-    df["pepsi_snr"] = snr
-    df["pepsi_exp_time"] = [
-        pepsi_exptime(vmag, snr, teff=teff, fiber_setup=fiber, binocular=binocular)[cd_red - 1]
-        for vmag, teff in df[["Vmag", "Teff"]].values
-    ]
-    df["pepsi_priority"] = ""
-    df["pepsi_notes"] = ""
-    return df
-
-
-from astropy.coordinates import Angle
-from astropy.table import Table
-import astropy.units as u
-import numpy as np
 import pandas as pd
+# from targetlistcreator import TargetList
 
 
-def write_lbt_readme_file(file_base: str, targets: pd.DataFrame) -> str:
+def add_pepsi_params(
+    tl: TargetList,
+    fiber: str,
+    cd_blue: int,
+    cd_red: int,
+    snr: int,
+    binocular: bool = False,
+    priority: str = "",
+    notes: str = "",
+    column_prefix="PEPSI ",
+    **kwargs,
+) -> pd.DataFrame:
+    answer = tl.copy()
+    answer.target_list[f"{column_prefix}fiber"] = fiber
+    answer.target_list[f"{column_prefix}cd_blue"] = cd_blue
+    answer.target_list[f"{column_prefix}cd_blue_num_exp"] = 1
+    answer.target_list[f"{column_prefix}cd_red"] = cd_red
+    answer.target_list[f"{column_prefix}cd_red_num_exp"] = 1
+    answer.target_list[f"{column_prefix}snr"] = snr
+    answer.target_list[f"{column_prefix}exp_time"] = [
+        max(
+            (times := pepsi_exptime(vmag, snr, teff=teff, fiber_setup=fiber, binocular=binocular))[cd_red - 1],
+            times[cd_blue - 1],
+            60, # never recommend exposures under 1 minute
+        )
+        for vmag, teff in answer.target_list[["Vmag", "Teff"]].values
+    ]
+    answer.target_list[f"{column_prefix}priority"] = priority
+    answer.target_list[f"{column_prefix}notes"] = notes
+    primary_columns = {f"{column_prefix}exp_time", f"{column_prefix}priority", f"{column_prefix}notes"}
+    secondary_columns = set([col for col in answer.target_list.columns if col.startswith(column_prefix)]) - primary_columns
+    answer.column_groups[column_prefix] = (list(primary_columns), list(secondary_columns))
+    return answer
+
+
+from astropy.table import Table
+
+
+def make_lbt_readme_table(targets: pd.DataFrame) -> pd.DataFrame:
     # build up a new table in proper format
     readme = Table()
-    readme["Target Name"] = targets["target_name"]
-    readme["ra"] = targets["ra"]
+    readme["Target Name"] = targets["Target Name"]
     readme["RA"] = targets["RA"]
     readme["Dec"] = targets["Dec"]
     readme["Vmag"] = targets["Vmag"]
     readme["Teff"] = targets["Teff"]
-    readme["Fiber"] = targets["pepsi_fiber"]
-    readme["BLUE Cross Disperser"] = targets["pepsi_cd_blue"]
-    readme["BLUE CD NExp"] = targets["pepsi_cd_blue_num_exp"]
-    readme["BLUE CD Exp Time"] = targets["pepsi_exp_time"]
-    readme["RED Cross Disperser"] = targets["pepsi_cd_red"]
-    readme["RED CD NExp"] = targets["pepsi_cd_red_num_exp"]
-    readme["RED CD Exp Time"] = targets["pepsi_exp_time"]
-    readme["Desired BLUE SNR"] = targets["pepsi_snr"]
-    readme["Desired RED SNR"] = targets["pepsi_snr"]
-    readme["Priority"] = targets["pepsi_priority"]
-    readme["Notes"] = targets["pepsi_notes"]
-    readme.sort("ra")
-    readme.remove_column("ra")
+    readme["Fiber"] = targets["PEPSI fiber"]
+    readme["BLUE Cross Disperser"] = targets["PEPSI cd_blue"]
+    readme["BLUE CD NExp"] = targets["PEPSI cd_blue_num_exp"]
+    readme["BLUE CD Exp Time"] = [f"{time / 60:.1f}" for time in targets["PEPSI exp_time"]]
+    readme["RED Cross Disperser"] = targets["PEPSI cd_red"]
+    readme["RED CD NExp"] = targets["PEPSI cd_red_num_exp"]
+    readme["RED CD Exp Time"] = [f"{time / 60:.1f}" for time in targets["PEPSI exp_time"]]
+    readme["Desired BLUE SNR"] = targets["PEPSI snr"]
+    readme["Desired RED SNR"] = targets["PEPSI snr"]
+    readme["Priority"] = targets["PEPSI priority"]
+    readme["Notes"] = targets["PEPSI notes"]
+    readme.sort("RA")
+    return readme
 
 
+def write_lbt_readme_file(file_base: str, targets: pd.DataFrame) -> str:
+    readme = make_lbt_readme_table(targets)
     # save target list as csv
     readme.write(file_base + ".csv", overwrite=True)
 
