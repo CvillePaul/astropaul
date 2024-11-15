@@ -57,22 +57,6 @@ class ObservingSession:
             self.add_full_day(day)
             day += 1 * u.day
 
-    # # astroplan needs a contiguous range of time to test observability
-    # # break given range(s) into observing nights & test separately, combining results
-    # sample_intervals = []  # list of tuples of time range(s) to test
-    # for time_segment in time_segments:
-    #     beg_time, end_time = time_segment
-    #     if (end_time - beg_time) > 1 * u.day:
-    #         curr_time = beg_time
-    #         term_time = observer.sun_rise_time(end_time, which="next")
-    #         while curr_time < term_time:
-    #             beg_night = observer.sun_set_time(curr_time, which="nearest")
-    #             end_night = observer.sun_rise_time(beg_night, which="next")
-    #             sample_intervals.append((beg_night, end_night))
-    #             curr_time += 1 * u.day
-    #     else:
-    #         sample_intervals.append(time_segment)
-
 
 class TargetList:
     def __init__(
@@ -391,8 +375,7 @@ def hide_cols(tl: TargetList, **kwargs) -> TargetList:
 
 def add_observability(
     tl: TargetList,
-    observer: ap.Observer,
-    time_segments: list[tuple[Time, Time]],
+    observing_session: ObservingSession,
     constraints: list[ap.Constraint] = None,
     column_prefix: str = "Observable ",
     calc_max_altitude: bool = False,
@@ -405,40 +388,25 @@ def add_observability(
             # ap.AirmassConstraint(1),
         ]
     coords = SkyCoord(ra=tl.target_list["ra"].values * u.deg, dec=tl.target_list["dec"].values * u.deg)
-    # astroplan needs a contiguous range of time to test observability
-    # break given range(s) into observing nights & test separately, combining results
-    sample_intervals = []  # list of tuples of time range(s) to test
-    for time_segment in time_segments:
-        beg_time, end_time = time_segment
-        if (end_time - beg_time) > 1 * u.day:
-            curr_time = beg_time
-            term_time = observer.sun_rise_time(end_time, which="next")
-            while curr_time < term_time:
-                beg_night = observer.sun_set_time(curr_time, which="nearest")
-                end_night = observer.sun_rise_time(beg_night, which="next")
-                sample_intervals.append((beg_night, end_night))
-                curr_time += 1 * u.day
-        else:
-            sample_intervals.append(time_segment)
 
-    # calculate observability for each nightly time range
+    # calculate observability for each time segment of the observing session
     answer = tl.copy()
     overall_any_night = np.array([False] * len(answer.target_list))
     overall_every_night = np.array([True] * len(answer.target_list))
     overall_max_alts = np.array([-90.0] * len(answer.target_list))
     overall_min_moon_dist = np.array([180.0] * len(answer.target_list))
     nightly_columns = []
-    for sample_interval in sample_intervals:
-        interval_observability = np.array(ap.is_observable(constraints, observer, coords, time_range=sample_interval))
-        column_name = f"{column_prefix}{sample_interval[0].iso[:10]}"
+    for beg, end in observing_session.observing_segments:
+        interval_observability = np.array(ap.is_observable(constraints, observing_session.observer, coords, time_range=(beg, end)))
+        column_name = f"{column_prefix}{beg.iso[:10]}"
         answer.target_list[column_name] = interval_observability
         overall_any_night |= interval_observability
         overall_every_night &= interval_observability
         nightly_columns.append(column_name)
         if calc_max_altitude:
             max_alt_column = f"{column_name} Max Alt"
-            time_grid = ap.utils.time_grid_from_range(sample_interval, time_resolution=15 * u.min)
-            dist = [np.max(observer.altaz(time_grid, coord).alt.value) for coord in coords]
+            time_grid = ap.utils.time_grid_from_range((beg, end), time_resolution=15 * u.min)
+            dist = [np.max(observing_session.observer.altaz(time_grid, coord).alt.value) for coord in coords]
             answer.target_list[max_alt_column] = dist
             nightly_columns.append(max_alt_column)
             overall_max_alts = [
@@ -446,9 +414,8 @@ def add_observability(
             ]
         if calc_moon_distance:
             # the moon doesn't move much, so just calculate the distance at the start of the night
-            moon = get_body("moon", sample_interval[0], observer.location)
+            moon = get_body("moon", beg, observing_session.observer.location)
             moon_dist_column = f"{column_name} Min Moon Dist"
-            time_grid = ap.utils.time_grid_from_range(sample_interval, time_resolution=15 * u.min)
             # NOTE: for some reason it has to be moon.separation(coords) not coords.separation(moon)!!!
             dist = moon.separation(coords).value
             answer.target_list[moon_dist_column] = dist
@@ -471,8 +438,8 @@ def add_observability(
         main_columns.append(moon_dist_column)
     answer.column_groups[column_prefix.strip()] = (main_columns, nightly_columns)
     moon_phases = pd.DataFrame()
-    moon_phases["Time"] = [beg.iso[:10] for beg, _ in sample_intervals]
-    moon_phases["Phase"] = [ap.moon_illumination(t) for t, _ in sample_intervals]
+    moon_phases["Time"] = [beg.iso[:10] for beg, _ in observing_session.observing_segments]
+    moon_phases["Phase"] = [ap.moon_illumination(t) for t, _ in observing_session.observing_segments]
     answer.addOther("Lunar Phases", moon_phases)
     return answer
 
