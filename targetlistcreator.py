@@ -43,15 +43,15 @@ class ObservingSession:
         self.observing_segments.append(self._determine_nighttime(Time(day)))
 
     def add_half_day(self, day: str | Time, first_half: bool = True):
-        beg, end = self._determine_nighttime(day)
+        beg, end = self._determine_nighttime(Time(day))
         mid = Time(beg.jd + ((end.jd - beg.jd) / 2), format="jd")
         if first_half:
             self.observing_segments.append((beg, mid))
         else:
             self.observing_segments.append((mid, end))
 
-    def add_day_range(self, range: tuple[str, str] | tuple[Time, Time]):
-        beg, end = Time(range[0]), Time(range[1])
+    def add_day_range(self, beg: str | Time, end: str | Time):
+        beg, end = Time(beg), Time(end)
         day = beg
         while day < end:
             self.add_full_day(day)
@@ -456,3 +456,5 @@ def filter_targets(
     else:
         answer.target_list = answer.target_list[criteria(answer.target_list)]
     return answer
+
+# target, system, component, beg phase, ingress, peak eclipse, egress, phase 25, phase 50, phase 75, end phase
