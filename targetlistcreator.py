@@ -57,6 +57,26 @@ class ObservingSession:
             self.add_full_day(day)
             day += 1 * u.day
 
+    def calc_subsegments(self, interval: u.Quantity=1 * u.hour, top_of_hour: bool = True) -> list[list[(Time, Time)]] :
+        """Chop each observing segment into a list of subsegments that are `interval` long.
+        In general, the last sub segment will be shorter than `interval`
+        If `top_of_hour`, first sub segment might also be shorter than `interval`"""
+        answer = []
+        for beg, end in self.observing_segments:
+            sub_segment = []
+            if top_of_hour:
+                t = Time(pd.Timestamp(beg.to_datetime()).ceil("h"))
+                if t - beg > 0:
+                    sub_segment.append((beg, t)) # sub segment smaller than `interval`
+            else:
+                t = beg
+            while t < end:
+                next = min(t + interval, end)
+                sub_segment.append((t, next))
+                t = next
+            answer.append(sub_segment)
+        return answer
+
 
 class TargetList:
     def __init__(
