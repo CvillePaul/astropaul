@@ -80,10 +80,10 @@ class TargetList:
         )
         return answer
 
-    def addColumns(self, columns: dict[str, Any] = {}):
+    def add_columns(self, columns: dict[str, Any] = {}):
         pass
 
-    def addOther(self, name: str, other: pd.DataFrame):
+    def add_other(self, name: str, other: pd.DataFrame):
         self.other_lists[name] = other
 
     def summarize(self) -> str:
@@ -306,7 +306,7 @@ def add_ephemerides(tl: TargetList, column_prefix="Ephem ", **kwargs) -> TargetL
     new_column_names = {column: f"{column_prefix}{column.capitalize()}" for column in ephem.columns}
     ephem.rename(columns=new_column_names, inplace=True)
     answer = tl.copy()
-    answer.addOther(column_prefix.strip().replace("_", ""), ephem)
+    answer.add_other(column_prefix.strip().replace("_", ""), ephem)
     return answer
 
 
@@ -440,7 +440,7 @@ def add_observability(
     moon_phases = pd.DataFrame()
     moon_phases["Time"] = [beg.iso[:10] for beg, _ in observing_session.observing_segments]
     moon_phases["Phase"] = [ap.moon_illumination(t) for t, _ in observing_session.observing_segments]
-    answer.addOther("Lunar Phases", moon_phases)
+    answer.add_other("Lunar Phases", moon_phases)
     return answer
 
 
@@ -456,5 +456,3 @@ def filter_targets(
     else:
         answer.target_list = answer.target_list[criteria(answer.target_list)]
     return answer
-
-# target, system, component, beg phase, ingress, peak eclipse, egress, phase 25, phase 50, phase 75, end phase
