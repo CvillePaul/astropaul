@@ -85,7 +85,7 @@ class PhaseEventList:
                 answer += f"{event}\n"
         return answer
 
-    def determine_phase_for_span(self, beg: float, end: float):
+    def calc_time_in_spans(self, beg: float, end: float):
         """Calculate which event occupied the largest portion of a subsection of an observing session"""
         if beg < self.beg or end > self.end:
             raise ValueError(f"Parameters need to fall within the timeframe {self.beg} to {self.end}")
@@ -112,6 +112,10 @@ class PhaseEventList:
         return time_spans
         # return max(time_spans, key=time_spans.get)
 
+    def calc_longest_span(self, beg: float, end: float):
+        spans = self.calc_time_in_spans(beg, end)
+        return max(spans, key=spans.get)
+
     @staticmethod
     def calc_phase_events(ephem: Ephemeris, event_defs: list[PhaseEventDef], beg: float, end: float) -> "PhaseEventList":
         if end < beg:
@@ -123,6 +127,7 @@ class PhaseEventList:
         t = ephem.t0 + orbit * ephem.period  # start at the mid-eclipse prior to beg
         if t >= beg:
             orbit -= 1
+            t -= ephem.period
         event_at_beg = None
 
         def calc_phase(t0: float, period: float, time: float) -> float:
@@ -132,6 +137,7 @@ class PhaseEventList:
 
         beg_phase = calc_phase(ephem.t0, ephem.period, beg)
         end_phase = calc_phase(ephem.t0, ephem.period, end)
+        prev_event = None
         answer = PhaseEventList(beg=beg, end=end, beg_phase=beg_phase, end_phase=end_phase)
         while t < end:
             event_def = event_defs[i]
@@ -141,11 +147,16 @@ class PhaseEventList:
                     # insert a possibly partial event to note the event in force at start of time interval
                     first_event = event_at_beg or event
                     if first_event.jd < beg:
+                        print(first_event.jd)
                         first_event.jd = float("nan")
+                        first_event.phase = float("nan")
                         answer.events.append(first_event)
                     answer.events.append(event)
                 else:
-                    answer.events.append(event)
+                    if event.type != prev_event.type:
+                        # skip adding consecutive events of the same type
+                        answer.events.append(event)
+                prev_event = event
             else:
                 event_at_beg = event
             i += 1
