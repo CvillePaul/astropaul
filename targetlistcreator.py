@@ -39,7 +39,8 @@ class ObservingSession:
     def time_range(self) -> tuple[Time, Time]:
         return (
             min(self.observing_segments, key=operator.itemgetter(0))[0],
-            max(self.observing_segments, key=operator.itemgetter(1))[1])
+            max(self.observing_segments, key=operator.itemgetter(1))[1],
+        )
 
     def _determine_nighttime(self, night: Time) -> tuple[Time, Time]:
         beg_night = self.observer.sun_set_time(night, which="nearest")
@@ -64,22 +65,29 @@ class ObservingSession:
             self.add_full_day(day)
             day += 1 * u.day
 
-    def calc_subsegments(self, interval: u.Quantity=1 * u.hour, top_of_hour: bool = True) -> list[list[(Time, Time)]] :
+    def calc_subsegments(
+        self, interval: u.Quantity = 1 * u.hour, top_of_hour: bool = True, skip_partial: bool = False
+    ) -> list[list[(Time, Time)]]:
         """Chop each observing segment into a list of subsegments that are `interval` long.
         In general, the last sub segment will be shorter than `interval`
-        If `top_of_hour`, first sub segment might also be shorter than `interval`"""
+        If `top_of_hour`, first sub segment might also be shorter than `interval`
+        Sub segments shorter than `interval` can be skipped by setting `skip_partial`"""
+
         answer = []
         for beg, end in self.observing_segments:
             sub_segment = []
+            t = beg
             if top_of_hour:
                 t = Time(pd.Timestamp(beg.to_datetime()).ceil("h"))
-                if t - beg > 0:
-                    sub_segment.append((beg, t)) # sub segment smaller than `interval`
-            else:
-                t = beg
+                if t - beg > 0 * u.day and not skip_partial:
+                    sub_segment.append((beg, t))  # 1st sub segment, smaller than `interval`
             while t < end:
-                next = min(t + interval, end)
-                sub_segment.append((t, next))
+                next = t + interval
+                if next < end:
+                    sub_segment.append((t, next))
+                else:
+                    if not skip_partial:
+                        sub_segment.append((t, end))
                 t = next
             answer.append(sub_segment)
         return answer
@@ -423,7 +431,9 @@ def add_observability(
     overall_min_moon_dist = np.array([180.0] * len(answer.target_list))
     nightly_columns = []
     for beg, end in observing_session.observing_segments:
-        interval_observability = np.array(ap.is_observable(constraints, observing_session.observer, coords, time_range=(beg, end)))
+        interval_observability = np.array(
+            ap.is_observable(constraints, observing_session.observer, coords, time_range=(beg, end))
+        )
         column_name = f"{column_prefix}{beg.iso[:10]}"
         answer.target_list[column_name] = interval_observability
         overall_any_night |= interval_observability
