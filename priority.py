@@ -1,3 +1,4 @@
+import operator
 from typing import Any
 
 import astroplan as ap
@@ -23,17 +24,17 @@ class PriorityList:
         self.interval = interval
         self.targets = target_list.target_list["Target Name"]  # TODO: remove hard coded column name
         self.segments = session.calc_subsegments(interval)
-        self.tables = {}
+        self.tables = {}  # key=target name, value = list[dataframe], one per observing segment, indexed by observing subsegment
         for target in self.targets:
-            segments = []
+            tables = []
             for segment in self.segments:
                 table = pd.DataFrame(index=[beg.to_datetime() for beg, _ in segment])
-                segments.append(table)
-            self.tables[target] = segments
+                tables.append(table)
+            self.tables[target] = tables
+        self.target_priorities : list[pd.DataFrame] = None
 
 
-
-CategoryTable = list[tuple[tuple[float, float], Any]]
+CategoryTable = list[tuple[tuple[Any, Any], Any]]
 
 
 def pick_category(categories: CategoryTable, value: float) -> Any:
@@ -45,28 +46,6 @@ def pick_category(categories: CategoryTable, value: float) -> Any:
 def calculate_moon_priority(
     pl: PriorityList, illumination_categories: CategoryTable = None, dist_categories: CategoryTable = None
 ) -> None:
-    if not illumination_categories:
-        illumination_categories = [
-            ((0.0, 0.4), "Dark"),
-            ((0.4, 0.7), "Gray"),
-            ((0.7, 1.0), "Bright"),
-        ]
-    if not dist_categories:
-        dist_categories = {
-            "Dark": [
-                ((0, 1), 1),
-            ],
-            "Gray": [
-                ((0, 5), 0.1),
-                ((5, 15), 0.5),
-                ((15, 180), 1),
-            ],
-            "Bright": [
-                ((0, 15), 0.1),
-                ((15, 30), 0.5),
-                ((30, 180), 1),
-            ],
-        }
     for _, row in pl.target_list.target_list.iterrows():
         target = row["Target Name"]
         coord = SkyCoord(ra=row["ra"], dec=row["dec"], unit=u.deg)
@@ -86,14 +65,7 @@ def calculate_moon_priority(
             segment_table["Moon Priority"] = priorities
 
 
-def calculate_altitude_priority(pl: PriorityList, altitude_categories: CategoryTable = None) -> None:
-    if not altitude_categories:
-        altitude_categories = [
-            ((-90, 35), 0),
-            ((35, 45), 0.1),
-            ((45, 60), 0.5),
-            ((60, 90), 1),
-        ]
+def calculate_altitude_priority(pl: PriorityList, altitude_categories: CategoryTable) -> None:
     for _, row in pl.target_list.target_list.iterrows():
         target = row["Target Name"]
         coord = SkyCoord(ra=row["ra"], dec=row["dec"], unit=u.deg)
@@ -112,18 +84,56 @@ def calculate_list_priority(pl: PriorityList, list_name: str, invert: bool = Fal
         for table in pl.tables[target]:
             table[f"{list_name} Priority"] = priority
 
+
 def calculate_prior_observation_priority(pl: PriorityList, prior_observation_categories: CategoryTable) -> None:
     pass
 
-def calculate_phase_priority(pl: PriorityList, phase_defs: list[ph.PhaseEventDef], ) -> None:
-    pass
+
+def calculate_phase_priority(pl: PriorityList, phase_defs: list[ph.PhaseEventDef], phase_categories: dict[str, float]) -> None:
+    ephem_table = pl.target_list.other_lists["Ephem"]
+    min_priority = min(phase_categories, key=operator.itemgetter(1))
+    for target, table_list in pl.tables.items():
+        ephem_rows = ephem_table[(ephem_table["Ephem Name"] == target) & (ephem_table["Ephem Member"] == "a")]
+        if len(ephem_rows) < 2:
+            # flunk anything that doesn't have at least two binaries
+            for table in table_list:
+                table["Phase Priority"] = min_priority
+            continue
+        for _, row in ephem_rows.iterrows():
+            ephem = ph.Ephemeris(*row[["Ephem System", "Ephem Member", "Ephem T0", "Ephem Period", "Ephem Duration"]])
+            session_beg, session_end = pl.session.time_range
+            event_list = ph.PhaseEventList.calc_phase_events(ephem, phase_defs, session_beg.jd, session_end.jd)
+            # make columns for each system for each observing segment
+            for table, segments in zip(table_list, pl.segments):
+                states = [event_list.calc_longest_span(segment_beg.jd, segment_end.jd) for segment_beg, segment_end in segments]
+                table[f"Phase System {ephem.system} State"] = states
+        # make the overall priority column that considers all available systems
+        system_cols = [f"Phase System {system} State" for system in ephem_rows["Ephem System"]]
+        for table in table_list:
+            overall_priorities = []
+            for _, row in table.iterrows():
+                whole_state = "|".join(sorted(row[system_cols]))
+                overall_priorities.append(phase_categories[whole_state])
+            table["Phase Priority"] = overall_priorities
+
 
 def calculate_overall_priority(pl: PriorityList, weightings: dict[str, float]) -> None:
-    norm_factor = np.sum([weight for weight in weightings.values()])
+    # uncomment lines in order to switch to weighted sum priorities instead of multiplicative priorities
+    # norm_factor = np.prod([weight for weight in weightings.values()])
     for table_list in pl.tables.values():
         for table in table_list:
-            table["Overall Priority"] = 0
+            table["Overall Priority"] = 1  # 0
             for col, weight in weightings.items():
-                table["Overall Priority"] += table[f"{col} Priority"] * weight
-            table["Overall Priority"] /= norm_factor
+                table["Overall Priority"] *= table[f"{col} Priority"]  # * weight
+                # table["Overall Priority"] += table[f"{col} Priority"]  * weight
+            # table["Overall Priority"] /= norm_factor
 
+
+def aggregate_target_priorities(pl: PriorityList) -> None:
+    aggregate_tables = []
+    for segment in pl.segments:
+        aggregate_tables.append(pd.DataFrame(index=[beg.to_datetime() for beg, _ in segment]))
+    for target, target_tables in pl.tables.items():
+        for target_table, aggregate_table in zip(target_tables, aggregate_tables):
+            aggregate_table[target] = target_table["Overall Priority"]
+    pl.target_priorities = aggregate_tables
