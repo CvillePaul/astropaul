@@ -10,7 +10,6 @@ class Ephemeris:
     t0: float
     period: float
     duration: float
-    eccentricity: float
 
 
 @dataclass
@@ -80,37 +79,40 @@ class PhaseEventList:
         answer = f"{self.beg} JD to {self.end} JD\n"
         answer += f"Phase at start: {self.beg_phase:.2f}\n"
         answer += f"Phase at end: {self.end_phase:.2f}\n"
-        if self.events:
+        if self.events and len(self.events) > 0:
             for event in self.events:
                 answer += f"{event}\n"
+        else:
+            answer += "No events\n"
         return answer
 
     def calc_time_in_spans(self, beg: float, end: float):
-        """Calculate which event occupied the largest portion of a subsection of an observing session"""
-        if beg < self.beg or end > self.end:
-            raise ValueError(f"Parameters need to fall within the timeframe {self.beg} to {self.end}")
+        """Calculate which event occupied the largest portion of a subsegment of an observing session"""
+        if beg < self.beg or end > self.end or end < beg:
+            raise ValueError(f"Parameters ordered, and within the timeframe {self.beg} to {self.end}")
         if not self.events:
-            raise ValueError("No list of PhaseEventDef provided")
+            raise ValueError("This list has no events")
         time_spans = defaultdict(float)
+        prev_event = None
         for event in self.events:
-            if event.jd != event.jd:
-                # first event is often jd=nan to indicate it occurred before start of this time sequence
-                # treat it here as if it occurred at the beginning of this time sequence
+            if event.jd < beg or event.jd != event.jd:
+                # initial starting state is given by either most recent event before `beg` or a nan event
                 prev_event = replace(event, jd=beg)
                 continue
-            this_span = min(event.jd, end) - prev_event.jd
-            time_spans[prev_event.type] = this_span
             if event.jd >= end:
                 break  # there might be events after this time sequence, but we don't need them here
+            if beg <= event.jd < end:
+                if prev_event:
+                    this_span = min(event.jd, end) - prev_event.jd
+                    time_spans[prev_event.type] = this_span
             prev_event = event
-        last_event = self.events[-1]
-        if last_event.jd < end:
-            # capture the time we missed when the loop terminated
-            time_spans[last_event.type] += end - last_event.jd
+        if prev_event.jd < end:
+            # capture the time we missed when the loop terminated, ie, from last event to `end`
+            time_spans[prev_event.type] += end - prev_event.jd
         if len(time_spans) == 0:
+            # if no events other than the one indicating starting state, we were in starting state the whole time
             time_spans[prev_event.type] = end - beg
         return time_spans
-        # return max(time_spans, key=time_spans.get)
 
     def calc_longest_span(self, beg: float, end: float):
         spans = self.calc_time_in_spans(beg, end)
@@ -118,50 +120,48 @@ class PhaseEventList:
 
     @staticmethod
     def calc_phase_events(ephem: Ephemeris, event_defs: list[PhaseEventDef], beg: float, end: float) -> "PhaseEventList":
-        if end < beg:
-            raise ValueError("Time segment not chronological")
-        if not ephem or not event_defs:
-            raise ValueError("No parameters can be None")
-        orbit = int((beg - ephem.t0) / ephem.period)
-        i = 0
-        t = ephem.t0 + orbit * ephem.period  # start at the mid-eclipse prior to beg
-        if t >= beg:
-            orbit -= 1
-            t -= ephem.period
-        event_at_beg = None
-
+        """Find all phase events `beg` <= event < `end`
+        If no event exactly at `beg`, first returned event is last event before `beg`, with `jd` & `phase` set to `nan`
+        The `event_defs` elements MUST be arranged in order of increasing phase
+        """
         def calc_phase(t0: float, period: float, time: float) -> float:
             orbit = int((time - t0) / period)
             last_eclipse = t0 + period * orbit
             return (time - last_eclipse) / period
 
-        beg_phase = calc_phase(ephem.t0, ephem.period, beg)
-        end_phase = calc_phase(ephem.t0, ephem.period, end)
+        if end < beg:
+            raise ValueError("Time segment not chronological")
+        if not ephem or not event_defs:
+            raise ValueError("No parameters can be None")
+        orbit = int((beg - ephem.t0) / ephem.period)
         prev_event = None
-        answer = PhaseEventList(beg=beg, end=end, beg_phase=beg_phase, end_phase=end_phase)
-        while t < end:
+        i = 0
+        events = []
+        while True:
             event_def = event_defs[i]
             event = event_def.calculation(event_def.name, ephem, orbit)
-            if beg <= event.jd <= end:
-                if len(answer.events) == 0:
-                    # insert a possibly partial event to note the event in force at start of time interval
-                    first_event = event_at_beg or event
-                    if first_event.jd < beg:
-                        print(first_event.jd)
-                        first_event.jd = float("nan")
-                        first_event.phase = float("nan")
-                        answer.events.append(first_event)
-                    answer.events.append(event)
-                else:
-                    if event.type != prev_event.type:
-                        # skip adding consecutive events of the same type
-                        answer.events.append(event)
-                prev_event = event
-            else:
-                event_at_beg = event
-            i += 1
-            if i == len(event_defs):
-                i = 0
+            if event.jd < beg:
+                # we only want to keep the most recent event before beg, to signify the state when the time region began
+                # nullify the jd and phase so we only return events beg <= jd < end
+                events = [replace(event, jd=float("nan"), phase=float("nan"))]
+            elif beg <= event.jd < end:
+                # these are the events we will keep
+                if event.jd == beg:
+                    # clear out any previously kept starting event since we now have an event exactly at the start
+                    events = []
+                if not prev_event or prev_event.type != event.type:
+                    # keep the event if it is of different type than the previous one
+                    events.append(event)
+            elif event.jd >= end:
+                break
+            i = (i + 1) % len(event_defs)
+            if i == 0:
                 orbit += 1
-            t = event.jd
+            prev_event = event
+        if len(events) == 0 and prev_event:
+            # if we only had an event before beg and none between beg & end, record the state in effect the whole time
+            events = [replace(prev_event, jd=float("nan"), phase=float("nan"))]
+        beg_phase = calc_phase(ephem.t0, ephem.period, beg)
+        end_phase = calc_phase(ephem.t0, ephem.period, end)
+        answer = PhaseEventList(beg=beg, end=end, beg_phase=beg_phase, end_phase=end_phase, events=events)
         return answer
