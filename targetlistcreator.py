@@ -1,5 +1,6 @@
 import collections
 import datetime
+import operator
 import platform
 from typing import Any
 
@@ -33,6 +34,12 @@ class ObservingSession:
         else:
             answer += "No observing segments defined\n"
         return answer
+
+    @property
+    def time_range(self) -> tuple[Time, Time]:
+        return (
+            min(self.observing_segments, key=operator.itemgetter(0))[0],
+            max(self.observing_segments, key=operator.itemgetter(1))[1])
 
     def _determine_nighttime(self, night: Time) -> tuple[Time, Time]:
         beg_night = self.observer.sun_set_time(night, which="nearest")
@@ -383,12 +390,11 @@ def add_coords(tl: TargetList, **kwargs) -> TargetList:
     return answer
 
 
-def hide_cols(tl: TargetList, **kwargs) -> TargetList:
+def hide_cols(tl: TargetList, prefix: str, **kwargs) -> TargetList:
     answer = tl.copy()
-    if prefix := kwargs.get("prefix"):
-        cols_to_remove = [col for col in tl.target_list.columns if col.startswith(prefix)]
-        if len(cols_to_remove) > 0:
-            answer.target_list.drop(labels=cols_to_remove, axis=1, inplace=True)
+    cols_to_remove = [col for col in tl.target_list.columns if col.startswith(prefix)]
+    if len(cols_to_remove) > 0:
+        answer.target_list.drop(labels=cols_to_remove, axis=1, inplace=True)
     del answer.column_groups[prefix]
     return answer
 
