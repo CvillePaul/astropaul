@@ -1,15 +1,18 @@
+from datetime import datetime
 import operator
+import platform
 from typing import Any
 
 import astroplan as ap
 from astropy.coordinates import SkyCoord, get_body, GCRS
 from astropy.time import Time
 import astropy.units as u
+import itables
 import numpy as np
 import pandas as pd
 
-import targetlistcreator as tlc
-import phase as ph
+import astropaul.targetlistcreator as tlc
+import astropaul.phase as ph
 
 
 class PriorityList:
@@ -31,7 +34,7 @@ class PriorityList:
                 table = pd.DataFrame(index=[beg.to_datetime() for beg, _ in segment])
                 tables.append(table)
             self.tables[target] = tables
-        self.target_priorities : list[pd.DataFrame] = None
+        self.target_priorities: list[pd.DataFrame] = None
 
 
 CategoryTable = list[tuple[tuple[Any, Any], Any]]
@@ -80,7 +83,10 @@ def calculate_altitude_priority(pl: PriorityList, altitude_categories: CategoryT
 def calculate_list_priority(pl: PriorityList, list_name: str, invert: bool = False, false_value: float = 0.2) -> None:
     for _, row in pl.target_list.target_list.iterrows():
         target = row["Target Name"]
-        priority = (row[f"List {list_name}"] ^ invert) * (1 - false_value) + false_value
+        list_value = row[f"List {list_name}"]
+        if list_value != list_value: # set NaN values to False
+            list_value = False
+        priority = 1 if (list_value ^ invert) else false_value
         for table in pl.tables[target]:
             table[f"{list_name} Priority"] = priority
 
@@ -119,21 +125,67 @@ def calculate_phase_priority(pl: PriorityList, phase_defs: list[ph.PhaseEventDef
 
 def calculate_overall_priority(pl: PriorityList, weightings: dict[str, float]) -> None:
     # uncomment lines in order to switch to weighted sum priorities instead of multiplicative priorities
-    # norm_factor = np.prod([weight for weight in weightings.values()])
+    # norm_factor = np.sum([weight for weight in weightings.values()])
     for table_list in pl.tables.values():
         for table in table_list:
             table["Overall Priority"] = 1  # 0
             for col, weight in weightings.items():
-                table["Overall Priority"] *= table[f"{col} Priority"]  # * weight
+                table["Overall Priority"] *= table[f"{col} Priority"] * weight
                 # table["Overall Priority"] += table[f"{col} Priority"]  * weight
             # table["Overall Priority"] /= norm_factor
 
 
-def aggregate_target_priorities(pl: PriorityList) -> None:
+def aggregate_target_priorities(pl: PriorityList, skip_column_threshold: float = 0) -> None:
     aggregate_tables = []
     for segment in pl.segments:
         aggregate_tables.append(pd.DataFrame(index=[beg.to_datetime() for beg, _ in segment]))
+    # add a column to each table for each target's overall priority
     for target, target_tables in pl.tables.items():
         for target_table, aggregate_table in zip(target_tables, aggregate_tables):
-            aggregate_table[target] = target_table["Overall Priority"]
-    pl.target_priorities = aggregate_tables
+            if np.max(target_table["Overall Priority"]) >= skip_column_threshold:
+                aggregate_table[target] = target_table["Overall Priority"]
+    final_tables = []
+    for aggregate_table in aggregate_tables:
+        aggregate_table.index = aggregate_table.index.strftime("%Y-%m-%d %H:%M")
+        target_list = pl.target_list.target_list
+        this_table_target_list = target_list[target_list["Target Name"].isin(aggregate_table.columns)]
+        ra_order = list(this_table_target_list.sort_values("ra")["Target Name"])
+        # ra_order = {this_table_target_list.sort_values("ra")[["Target Name", "ra"]]}
+        final_tables.append(aggregate_table[ra_order])
+
+    pl.target_priorities = final_tables
+
+
+def aggregate_table_to_html(agg_table: pd.DataFrame, file: str = None) -> str:
+    table_name = "targetList"
+    caption = f"Created {datetime.now().astimezone().isoformat(sep=" ", timespec="seconds")} on {platform.node()}"
+    html = itables.to_html_datatable(
+        df=agg_table,
+        caption=caption,
+        table_id=table_name,
+        connected=True,
+        paging=False,
+        maxBytes=0,
+        maxColumns=0,
+        autoWidth=False,
+        layout={"topStart": None, "topEnd": None},
+        classes="display nowrap compact cell-border",
+    )
+    html += f"""
+        <style>
+        #{table_name} th {{
+            white-space: normal;
+            word-wrap: break-word;
+            text-align: center;
+        }}
+        caption {{
+            text-align: left;
+            font-style: italic;
+        }}
+        </style>
+        """
+
+    if file:
+        with open(file, "w") as f:
+            f.write(html)
+    return html
