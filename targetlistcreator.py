@@ -66,7 +66,7 @@ class ObservingSession:
             day += 1 * u.day
 
     def calc_subsegments(
-        self, interval: u.Quantity = 1 * u.hour, top_of_hour: bool = True, skip_partial: bool = False
+        self, interval: u.Quantity = 1 * u.hour, top_of_hour: bool = True, skip_partial: bool = True
     ) -> list[list[(Time, Time)]]:
         """Chop each observing segment into a list of subsegments that are `interval` long.
         In general, the last sub segment will be shorter than `interval`

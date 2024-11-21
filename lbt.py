@@ -338,7 +338,7 @@ def pepsi_exptime(
 
 
 import pandas as pd
-from targetlistcreator import TargetList
+from .targetlistcreator import TargetList
 
 
 def add_pepsi_params(
@@ -398,7 +398,7 @@ def make_lbt_readme_table(targets: pd.DataFrame) -> pd.DataFrame:
     readme["Desired RED SNR"] = targets["PEPSI snr"]
     readme["Priority"] = targets["PEPSI priority"]
     readme["Notes"] = targets["PEPSI notes"]
-    readme.sort("RA")
+    # readme.sort("RA")
     return readme
 
 
