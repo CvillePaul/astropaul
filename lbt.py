@@ -390,15 +390,15 @@ def make_lbt_readme_table(targets: pd.DataFrame) -> pd.DataFrame:
     readme["Fiber"] = targets["PEPSI fiber"]
     readme["BLUE Cross Disperser"] = targets["PEPSI cd_blue"]
     readme["BLUE CD NExp"] = targets["PEPSI cd_blue_num_exp"]
-    readme["BLUE CD Exp Time"] = [f"{time / 60:.1f}" for time in targets["PEPSI exp_time"]]
+    readme["BLUE CD Exp Time"] = [f"{time:.0f}" for time in targets["PEPSI exp_time"]]
     readme["RED Cross Disperser"] = targets["PEPSI cd_red"]
     readme["RED CD NExp"] = targets["PEPSI cd_red_num_exp"]
-    readme["RED CD Exp Time"] = [f"{time / 60:.1f}" for time in targets["PEPSI exp_time"]]
+    readme["RED CD Exp Time"] = [f"{time:.0f}" for time in targets["PEPSI exp_time"]]
     readme["Desired BLUE SNR"] = targets["PEPSI snr"]
     readme["Desired RED SNR"] = targets["PEPSI snr"]
     readme["Priority"] = targets["PEPSI priority"]
     readme["Notes"] = targets["PEPSI notes"]
-    # readme.sort("RA")
+    readme.sort("RA")
     return readme
 
 
