@@ -15,6 +15,35 @@ import astropaul.targetlistcreator as tlc
 import astropaul.phase as ph
 
 
+def dataframe_to_datatable(table: pd.DataFrame, table_name: str = "table", caption: str = "", table_options: dict = {}):
+    default_options = {
+        "connected": True,
+        "paging": False,
+        "maxBytes": 0,
+        "maxColumns": 0,
+        "autoWidth": False,
+        "layout": {"topStart": None, "topEnd": None},
+        "classes": "display nowrap compact cell-border",
+    }
+    if caption == "":
+        caption = f"Created {datetime.now().astimezone().isoformat(sep=" ", timespec="seconds")} on {platform.node()}"
+    html = itables.to_html_datatable(df=table, caption=caption, table_id=table_name, **{**default_options, **table_options})
+    html += f"""
+        <style>
+        #{table_name} th {{
+            white-space: normal;
+            word-wrap: break-word;
+            text-align: center;
+        }}
+        caption {{
+            text-align: left;
+            font-style: italic;
+        }}
+        </style>
+        """
+    return html
+
+
 class PriorityList:
     def __init__(
         self,
@@ -27,14 +56,48 @@ class PriorityList:
         self.interval = interval
         self.targets = target_list.target_list["Target Name"]  # TODO: remove hard coded column name
         self.segments = session.calc_subsegments(interval)
-        self.tables = {}  # key=target name, value = list[dataframe], one per observing segment, indexed by observing subsegment
+        self.target_tables = {}  # key=target name, value = list[dataframe], one per observing segment, indexed by subsegment
         for target in self.targets:
             tables = []
             for segment in self.segments:
                 table = pd.DataFrame(index=[beg.to_datetime() for beg, _ in segment])
                 tables.append(table)
-            self.tables[target] = tables
-        self.target_priorities: list[pd.DataFrame] = None
+            self.target_tables[target] = tables
+        self.numerical_priorities: list[pd.DataFrame] = None
+        self.categorized_priorities: list[pd.DataFrame] = None
+
+    def categorize_priorities(self, bins: list[float] = None, labels: list[str] = None) -> None:
+        if not bins or not labels:
+            raise ValueError("No argument can be None")
+        if len(bins) != len(labels) + 1:
+            raise ValueError("List of bins must be one element larger than list of labels")
+        if not self.numerical_priorities:
+            raise ValueError("Overall numerical priorities have not been calculated yet")
+        self.categorized_priorities = []
+        for numerical_priority in self.numerical_priorities:
+            self.categorized_priorities.append(
+                numerical_priority.apply(lambda col: pd.cut(col, bins=bins, labels=labels, ordered=False, include_lowest=True))
+            )
+
+    def to_html(self, file_base: str = "Priorities"):
+        for target, target_table_list in self.target_tables.items():
+            for i, target_table in enumerate(target_table_list):
+                file = (f"Target {file_base} {target} {i:02d}.html"
+                    # f"{target_table.index[0].strftime("%Y-%m-%d %H_%M")} to "
+                    # f"{target_table.index[-1].strftime("%Y-%m-%d %H_%M")}.html"
+                )
+                with open(file, "w") as f:
+                    f.write(dataframe_to_datatable(target_table, "targetPriority"))
+        if self.numerical_priorities:
+            for i, priority_table in enumerate(self.numerical_priorities):
+                numerical_html = dataframe_to_datatable(priority_table, "numericalPriority")
+                with open(f"Numerical {file_base} {i:02d}.html", "w") as f:
+                    f.write(numerical_html)
+        if self.categorized_priorities:
+            for i, categories_table in enumerate(self.categorized_priorities):
+                categorized_html = dataframe_to_datatable(categories_table, "categorizedPriority")
+                with open(f"Categorized {file_base} {i:02d}.html", "w") as f:
+                    f.write(categorized_html)
 
 
 CategoryTable = list[tuple[tuple[Any, Any], Any]]
@@ -52,7 +115,7 @@ def calculate_moon_priority(
     for _, row in pl.target_list.target_list.iterrows():
         target = row["Target Name"]
         coord = SkyCoord(ra=row["ra"], dec=row["dec"], unit=u.deg)
-        for segment_table in pl.tables[target]:
+        for segment_table in pl.target_tables[target]:
             times = Time(segment_table.index)
             illuminations = ap.moon_illumination(times)
             illumination_names = [pick_category(illumination_categories, illumination) for illumination in illuminations]
@@ -72,7 +135,7 @@ def calculate_altitude_priority(pl: PriorityList, altitude_categories: CategoryT
     for _, row in pl.target_list.target_list.iterrows():
         target = row["Target Name"]
         coord = SkyCoord(ra=row["ra"], dec=row["dec"], unit=u.deg)
-        for segment_table in pl.tables[target]:
+        for segment_table in pl.target_tables[target]:
             times = Time(segment_table.index)
             altitudes = pl.session.observer.altaz(times, coord).alt.value
             priorities = [pick_category(altitude_categories, altitude) for altitude in altitudes]
@@ -84,10 +147,10 @@ def calculate_list_priority(pl: PriorityList, list_name: str, invert: bool = Fal
     for _, row in pl.target_list.target_list.iterrows():
         target = row["Target Name"]
         list_value = row[f"List {list_name}"]
-        if list_value != list_value: # set NaN values to False
+        if list_value != list_value:  # set NaN values to False
             list_value = False
         priority = 1 if (list_value ^ invert) else false_value
-        for table in pl.tables[target]:
+        for table in pl.target_tables[target]:
             table[f"{list_name} Priority"] = priority
 
 
@@ -98,7 +161,7 @@ def calculate_prior_observation_priority(pl: PriorityList, prior_observation_cat
 def calculate_phase_priority(pl: PriorityList, phase_defs: list[ph.PhaseEventDef], phase_categories: dict[str, float]) -> None:
     ephem_table = pl.target_list.other_lists["Ephem"]
     min_priority = min(phase_categories, key=operator.itemgetter(1))
-    for target, table_list in pl.tables.items():
+    for target, table_list in pl.target_tables.items():
         ephem_rows = ephem_table[(ephem_table["Ephem Name"] == target) & (ephem_table["Ephem Member"] == "a")]
         if len(ephem_rows) < 2:
             # flunk anything that doesn't have at least two binaries
@@ -126,7 +189,7 @@ def calculate_phase_priority(pl: PriorityList, phase_defs: list[ph.PhaseEventDef
 def calculate_overall_priority(pl: PriorityList, weightings: dict[str, float]) -> None:
     # uncomment lines in order to switch to weighted sum priorities instead of multiplicative priorities
     # norm_factor = np.sum([weight for weight in weightings.values()])
-    for table_list in pl.tables.values():
+    for table_list in pl.target_tables.values():
         for table in table_list:
             table["Overall Priority"] = 1  # 0
             for col, weight in weightings.items():
@@ -140,52 +203,19 @@ def aggregate_target_priorities(pl: PriorityList, skip_column_threshold: float =
     for segment in pl.segments:
         aggregate_tables.append(pd.DataFrame(index=[beg.to_datetime() for beg, _ in segment]))
     # add a column to each table for each target's overall priority
-    for target, target_tables in pl.tables.items():
+    for target, target_tables in pl.target_tables.items():
         for target_table, aggregate_table in zip(target_tables, aggregate_tables):
             if np.max(target_table["Overall Priority"]) >= skip_column_threshold:
                 aggregate_table[target] = target_table["Overall Priority"]
-    final_tables = []
-    for aggregate_table in aggregate_tables:
-        aggregate_table.index = aggregate_table.index.strftime("%Y-%m-%d %H:%M")
-        target_list = pl.target_list.target_list
-        this_table_target_list = target_list[target_list["Target Name"].isin(aggregate_table.columns)]
-        ra_order = list(this_table_target_list.sort_values("ra")["Target Name"])
-        # ra_order = {this_table_target_list.sort_values("ra")[["Target Name", "ra"]]}
-        final_tables.append(aggregate_table[ra_order])
-
-    pl.target_priorities = final_tables
-
-
-def aggregate_table_to_html(agg_table: pd.DataFrame, file: str = None) -> str:
-    table_name = "targetList"
-    caption = f"Created {datetime.now().astimezone().isoformat(sep=" ", timespec="seconds")} on {platform.node()}"
-    html = itables.to_html_datatable(
-        df=agg_table,
-        caption=caption,
-        table_id=table_name,
-        connected=True,
-        paging=False,
-        maxBytes=0,
-        maxColumns=0,
-        autoWidth=False,
-        layout={"topStart": None, "topEnd": None},
-        classes="display nowrap compact cell-border",
-    )
-    html += f"""
-        <style>
-        #{table_name} th {{
-            white-space: normal;
-            word-wrap: break-word;
-            text-align: center;
-        }}
-        caption {{
-            text-align: left;
-            font-style: italic;
-        }}
-        </style>
-        """
-
-    if file:
-        with open(file, "w") as f:
-            f.write(html)
-    return html
+    pl.numerical_priorities = []
+    target_list = pl.target_list.target_list
+    # each observing segment might have a different list of targets, so sorting by RA needs to happen per observing segment
+    for sub_segments, aggregate_table in zip(pl.segments, aggregate_tables):
+        this_target_list = target_list[target_list["Target Name"].isin(aggregate_table.columns)].sort_values("ra")
+        target_names = this_target_list["Target Name"].tolist()
+        # calculate LST at beginning of this observing segment
+        lst = pl.session.observer.local_sidereal_time(sub_segments[0][0]).to(u.deg).value
+        # now "pivot" the table so the first column is the RA 
+        i = next(i for i, ra in enumerate(this_target_list["ra"].tolist()) if ra > lst) # find first element with ra > lst
+        target_names = target_names[i:] + target_names[:i] # "rotate" the list so first ra is one > lst
+        pl.numerical_priorities.append(aggregate_table[target_names])
