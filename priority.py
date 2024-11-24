@@ -23,13 +23,14 @@ def dataframe_to_datatable(table: pd.DataFrame, table_name: str = "table", capti
         "maxColumns": 0,
         "autoWidth": False,
         "layout": {"topStart": None, "topEnd": None},
-        "classes": "display nowrap compact cell-border",
+        "classes": "compact cell-border hover",
     }
     if caption == "":
         caption = f"Created {datetime.now().astimezone().isoformat(sep=" ", timespec="seconds")} on {platform.node()}"
     html = itables.to_html_datatable(df=table, caption=caption, table_id=table_name, **{**default_options, **table_options})
     html += f"""
         <style>
+        td {{text-align: center}}
         #{table_name} th {{
             white-space: normal;
             word-wrap: break-word;
@@ -65,6 +66,8 @@ class PriorityList:
             self.target_tables[target] = tables
         self.numerical_priorities: list[pd.DataFrame] = None
         self.categorized_priorities: list[pd.DataFrame] = None
+        self.category_bins = None
+        self.category_labels = None
 
     def categorize_priorities(self, bins: list[float] = None, labels: list[str] = None) -> None:
         if not bins or not labels:
@@ -73,31 +76,82 @@ class PriorityList:
             raise ValueError("List of bins must be one element larger than list of labels")
         if not self.numerical_priorities:
             raise ValueError("Overall numerical priorities have not been calculated yet")
+        self.category_bins = bins
+        self.category_labels = labels
         self.categorized_priorities = []
         for numerical_priority in self.numerical_priorities:
-            self.categorized_priorities.append(
-                numerical_priority.apply(lambda col: pd.cut(col, bins=bins, labels=labels, ordered=False, include_lowest=True))
+            category_table = numerical_priority.apply(
+                lambda col: pd.cut(col, bins=bins, labels=labels, ordered=False, include_lowest=True)
             )
+            self.categorized_priorities.append(category_table)
 
-    def to_html(self, file_base: str = "Priorities"):
+    def to_html(self, file_base: str = "Priorities", dir: str = "."):
+        segment_starts = [segment[0][0].iso[:10] for segment in self.segments]
+        table_options = {"search": False, "sort": False}
+        # make a page for each target's priority scores
         for target, target_table_list in self.target_tables.items():
-            for i, target_table in enumerate(target_table_list):
-                file = (f"Target {file_base} {target} {i:02d}.html"
-                    # f"{target_table.index[0].strftime("%Y-%m-%d %H_%M")} to "
-                    # f"{target_table.index[-1].strftime("%Y-%m-%d %H_%M")}.html"
-                )
-                with open(file, "w") as f:
-                    f.write(dataframe_to_datatable(target_table, "targetPriority"))
+            for start_utc, target_table in zip(segment_starts, target_table_list):
+                tt = target_table.copy()
+                tt.index = [f"{time:%H:%M}" for time in tt.index]
+                target_html = f'<h1 style="text-align: center">{start_utc} Target Scores for {target}</h1>\n'
+                target_html += dataframe_to_datatable(tt, "targetPriority", table_options=table_options)
+                with open(f"{dir}/Target {file_base} {target} {start_utc}.html", "w") as f:
+                    f.write(target_html)
+        # make a page for numerical priorities for each observing segment
         if self.numerical_priorities:
-            for i, priority_table in enumerate(self.numerical_priorities):
-                numerical_html = dataframe_to_datatable(priority_table, "numericalPriority")
-                with open(f"Numerical {file_base} {i:02d}.html", "w") as f:
+            for start_utc, priority_table in zip(segment_starts, self.numerical_priorities):
+                pt = priority_table.copy()
+                pt.index = [f"{time:%H:%M}" for time in pt.index]
+                threshold = self.category_bins[-2]
+                for col in pt.columns:
+                    pt[col] = [val if val < threshold else f'<p style="background-color: #EBF4FA">{val:.3f}</p>' for val in pt[col]]
+                pt.columns = [f'<a href="Target {file_base} {target} {start_utc}.html">{target}</a>' for target in pt.columns]
+                numerical_html = f'<h1 style="text-align: center">{start_utc} Target Priorities</h1>\n'
+                numerical_html += dataframe_to_datatable(pt, "numericalPriority", table_options=table_options)
+                with open(f"{dir}/Numerical {file_base} {start_utc}.html", "w") as f:
                     f.write(numerical_html)
+        # make a page for categorized priorities for each observing segment
         if self.categorized_priorities:
-            for i, categories_table in enumerate(self.categorized_priorities):
-                categorized_html = dataframe_to_datatable(categories_table, "categorizedPriority")
-                with open(f"Categorized {file_base} {i:02d}.html", "w") as f:
+            for start_utc, categories_table in zip(segment_starts, self.categorized_priorities):
+                ct = categories_table.copy()  # make a copy we can alter for formatting purposes
+                ct.index = [f"{time:%H:%M}" for time in ct.index]
+                all_targets = self.target_list.target_list
+                these_targets = all_targets[all_targets["Target Name"].isin(ct.columns)]
+                extra_rows = ["RA", "Dec", "Teff"]
+                for row_name in extra_rows:
+                    ct.loc[row_name] = [
+                        these_targets[these_targets["Target Name"] == col][row_name].values[0] for col in ct.columns
+                    ]
+                new_ordering = [*ct.index[-len(extra_rows) :], *ct.index[: -len(extra_rows)]]
+                ct = ct.reindex(new_ordering)
+                ct.columns = [col[:8] + "..." for col in ct.columns]
+                categorized_html = f'<h1 style="text-align: center">{start_utc} Target Priorities</h1>\n'
+                categorized_html += dataframe_to_datatable(ct, "categorizedPriority", table_options=table_options)
+                with open(f"{dir}/Categorical {file_base} {start_utc}.html", "w") as f:
                     f.write(categorized_html)
+        # make summary page
+        summary_html = f"<h1>{self.target_list.name}</h1>\n"
+        summary_html += '<table cellpadding="10" border="1">\n'
+        summary_html += f'<tr><td>Session Start</td><td style="font-family: monospace">{self.session.time_range[0].iso}</td></tr><br>\n'
+        summary_html += f'<tr><td>Session Finish</td><td style="font-family: monospace">{self.session.time_range[1].iso}</td></tr><br>\n'
+        summary_html += f'<tr><td>Table Interval</td><td>{self.interval}</td></tr>\n'
+        summary_html += "</table><br>\n"
+        summary_html += "<h2>Target List Summary</h2>\n"
+        summary_html += '<pre style="font-family: monospace">\n'
+        summary_html += self.target_list.summarize()
+        summary_html += '</pre>\n'
+        summary_html += "<br><br><h2>Observing Segments</h2>\n"
+        summary_html += '<table cellpadding="10" style="text-align: center;">'
+        summary_html += '    <tr><th>Start</th><th>Finish</th><th>Numerical Priorities</th><th>Categorical Priorities</th></tr>'
+        for segment, segment_start in zip(self.segments, segment_starts):
+            summary_html += "<tr>"
+            summary_html += f'<td>{segment[0][0].iso[:19]}</td><td>{segment[-1][1].iso[:19]}</td>'
+            summary_html += f'<td><a href="Numerical {file_base} {segment_start}.html">Link</a></td>'
+            summary_html += f'<td><a href="Categorical {file_base} {segment_start}.html">Link</a></td>'
+            summary_html += "</tr>\n"
+        summary_html += "</table>\n"
+        with open(f"{dir}/{self.target_list.name}.html", "w") as f:
+            f.write(summary_html)
 
 
 CategoryTable = list[tuple[tuple[Any, Any], Any]]
@@ -215,7 +269,8 @@ def aggregate_target_priorities(pl: PriorityList, skip_column_threshold: float =
         target_names = this_target_list["Target Name"].tolist()
         # calculate LST at beginning of this observing segment
         lst = pl.session.observer.local_sidereal_time(sub_segments[0][0]).to(u.deg).value
-        # now "pivot" the table so the first column is the RA 
-        i = next(i for i, ra in enumerate(this_target_list["ra"].tolist()) if ra > lst) # find first element with ra > lst
-        target_names = target_names[i:] + target_names[:i] # "rotate" the list so first ra is one > lst
+        first_ra_of_night = lst - 60  # lst is the RA at 90 deg alt, we want targets at 30 deg alt
+        # now "pivot" the table so the first column is the RA
+        i = next(i for i, ra in enumerate(this_target_list["ra"].tolist()) if ra > first_ra_of_night)  # 1st viewable target
+        target_names = target_names[i:] + target_names[:i]  # "rotate" the list so first ra is one > lst
         pl.numerical_priorities.append(aggregate_table[target_names])
