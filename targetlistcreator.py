@@ -127,10 +127,10 @@ class TargetList:
         answer += f"{len(self.target_list)} targets:\n"
         for type, count in target_types.items():
             answer += f"    {count:4d} {type}\n"
-        answer += "Columns (primary, secondary):\n"
+        answer += "Column Count (primary, secondary):\n"
         for name, (primary, secondary) in self.column_groups.items():
             answer += f"    {name}: ({len(primary)}, {len(secondary)})\n"
-        answer += "Other tables:\n"
+        answer += "Other tables sizes:\n"
         for name, other in self.other_lists.items():
             answer += f"    {len(other):4d} {name}\n"
         return answer
@@ -148,7 +148,8 @@ class TargetList:
         ]
         table_name = "targetList"
         caption = f"{self.name}, created {datetime.datetime.now().astimezone().isoformat(sep=" ", timespec="seconds")} on {platform.node()}"
-        html = itables.to_html_datatable(
+        html = f'<h1 style="text-align: center">{self.name}</h1>\n'
+        html += itables.to_html_datatable(
             self.target_list,
             caption=caption,
             table_id=table_name,
