@@ -364,7 +364,7 @@ def add_pepsi_params(
         max(
             (times := pepsi_exptime(vmag, snr, teff=teff, fiber_setup=fiber, binocular=binocular))[cd_red - 1],
             times[cd_blue - 1],
-            60, # never recommend exposures under 1 minute
+            60,  # never recommend exposures under 1 minute
         )
         for vmag, teff in answer.target_list[["Vmag", "Teff"]].values
     ]
@@ -379,9 +379,10 @@ def add_pepsi_params(
 from astropy.table import Table
 
 
-def make_lbt_readme_table(targets: pd.DataFrame) -> pd.DataFrame:
-    # build up a new table in proper format
-    readme = Table()
+def make_lbt_readme_table(target_list: pd.DataFrame) -> pd.DataFrame:
+    targets = target_list.copy().sort_values("ra")
+    # TODO: put code to pivot rows to a given lst
+    readme = pd.DataFrame()
     readme["Target Name"] = targets["Target Name"]
     readme["RA"] = targets["RA"]
     readme["Dec"] = targets["Dec"]
@@ -390,28 +391,31 @@ def make_lbt_readme_table(targets: pd.DataFrame) -> pd.DataFrame:
     readme["Fiber"] = targets["PEPSI fiber"]
     readme["BLUE Cross Disperser"] = targets["PEPSI cd_blue"]
     readme["BLUE CD NExp"] = targets["PEPSI cd_blue_num_exp"]
-    readme["BLUE CD Exp Time"] = [f"{time:.0f}" for time in targets["PEPSI exp_time"]]
+    readme["BLUE CD Exp Time"] = [f"{val:.0f}" for val in targets["PEPSI exp_time"]]
     readme["RED Cross Disperser"] = targets["PEPSI cd_red"]
     readme["RED CD NExp"] = targets["PEPSI cd_red_num_exp"]
-    readme["RED CD Exp Time"] = [f"{time:.0f}" for time in targets["PEPSI exp_time"]]
+    readme["RED CD Exp Time"] = [f"{val:.0f}" for val in targets["PEPSI exp_time"]]
     readme["Desired BLUE SNR"] = targets["PEPSI snr"]
     readme["Desired RED SNR"] = targets["PEPSI snr"]
     readme["Priority"] = targets["PEPSI priority"]
     readme["Notes"] = targets["PEPSI notes"]
-    readme.sort("RA")
     return readme
 
 
 def write_lbt_readme_file(file_base: str, targets: pd.DataFrame) -> str:
     readme = make_lbt_readme_table(targets)
     # save target list as csv
-    readme.write(file_base + ".csv", overwrite=True)
-
+    readme.to_csv(
+        file_base + ".csv",
+    )
     # make the readme file by prepending/appending the header/footer info
     readme_header = open(file_base + ".README.header", "r").readlines()
     readme_footer = open(file_base + ".README.footer", "r").readlines()
     output = ""
-    for line in readme_header + readme.pformat_all() + readme_footer:
+    for line in readme_header:
+        output += line.rstrip() + "\n"
+    output += readme.to_string(index=False)
+    for line in readme_footer:
         output += line.rstrip() + "\n"
     with open(file_base + ".README", "w") as f:
         f.write(output)
