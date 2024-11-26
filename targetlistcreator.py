@@ -132,7 +132,7 @@ class TargetList:
             answer += f"    {name}: ({len(primary)}, {len(secondary)})\n"
         answer += "Other tables sizes:\n"
         for name, other in self.other_lists.items():
-            answer += f"    {len(other):4d} {name}\n"
+            answer += f"    {len(other):4d} {name} ({len(other.columns)} cols)\n"
         return answer
 
     def to_html(self, file: str = None) -> str:
@@ -337,6 +337,8 @@ def add_ephemerides(tl: TargetList, column_prefix="Ephem ", **kwargs) -> TargetL
         kwargs["connection"],
         index_col="id",
     )
+    existing_targets = tl.target_list["Target Name"]
+    ephem = ephem[ephem["name"].isin(existing_targets)]
     ephem["period"] = ephem["period"] / 3600 / 24  # convert from seconds to days for convenience
     ephem["duration"] = ephem["duration"] / 3600  # convert from seconds to hours for convenience
     new_column_names = {column: f"{column_prefix}{column.capitalize()}" for column in ephem.columns}
