@@ -5,15 +5,21 @@ from dataclasses import dataclass, replace
 
 @dataclass
 class Ephemeris:
+    """Holds all parameters necessary to calculate eclipse events"""
+
     system: str
     component: str
     t0: float
     period: float
     duration: float
+    # eccentricity: float
 
 
 @dataclass
 class PhaseEvent:
+    """Meant to encode the details of one particular occurrence in the lifetime of a bound system.
+    Examples include ingress, egress, mid eclipse, but could be anything defined by a PhaseEventDef"""
+
     jd: float  # a value of nan means the event occurred sometime before the current time segment
     system: str
     component: str
@@ -27,12 +33,23 @@ class PhaseEvent:
 
 @dataclass
 class PhaseEventDef:
+    """Holds code that defines some type of configuration of bodies that occurs once each period of a bound system."""
+
     name: str
     calculation: Callable[[str, Ephemeris, int], PhaseEvent]
 
 
-# helper functions useful when making phaseEventDef instances
 def calc_time_of_phase(name: str, ephemeris: Ephemeris, orbit: int, phase: float) -> PhaseEvent:
+    """Calculates events of a bound system that occur at a particular point in the phase of the system
+    
+    :param name: Descriptive title of the event, such as "mid eclipse"
+    :type name: str 
+    :param ephemeris: Parameters of the bound system
+    :type ephemeris: Ephemeris 
+    :param orbit: Orbit number in which the calculation should occur, starting with orbit zero at t0
+    :type orbit: int 
+    :param phase: The desired phase value, from 0. to 1., at which the event occurs
+    :type phase: float """
     return PhaseEvent(
         jd=ephemeris.t0 + orbit * ephemeris.period + phase * ephemeris.period,
         system=ephemeris.system,
@@ -48,6 +65,16 @@ def calc_mid_eclipse(name: str, ephemeris: Ephemeris, orbit: int) -> PhaseEvent:
 
 
 def calc_time_of_gress(name: str, ephemeris: Ephemeris, orbit: int, ingress: bool = True) -> PhaseEvent:
+    """Calculates the time of ingress or egress of an eclipsing system
+    
+    :param name: Descriptive title of the event, such as "egress"
+    :type name: str 
+    :param ephemeris: Parameters of the bound system
+    :type ephemeris: Ephemeris 
+    :param orbit: The orbit number in which the calculation should occur, starting with orbit zero at t0
+    :type orbit: int 
+    :param ingress: If true, calculate time of ingress into eclipse, otherwise, calculate time of egress
+    :type ingress: bool """
     t = ephemeris.t0 + orbit * ephemeris.period  # mid eclipse
     half_duration = ephemeris.duration / 2
     phase_change = half_duration / ephemeris.period
@@ -61,6 +88,7 @@ def calc_time_of_gress(name: str, ephemeris: Ephemeris, orbit: int, ingress: boo
 
 
 class PhaseEventList:
+    """Holds a list of PhaseEvent instances that occur between a specific start and end JD time"""
     def __init__(
         self,
         beg: float = float("nan"),
@@ -86,7 +114,7 @@ class PhaseEventList:
             answer += "No events\n"
         return answer
 
-    def calc_time_in_spans(self, beg: float, end: float):
+    def calc_time_in_spans(self, beg: float, end: float) -> defaultdict[str, float]:
         """Calculate which event occupied the largest portion of a subsegment of an observing session"""
         if beg < self.beg or end > self.end or end < beg:
             raise ValueError(f"Parameters ordered, and within the timeframe {self.beg} to {self.end}")
@@ -106,15 +134,15 @@ class PhaseEventList:
                     this_span = min(event.jd, end) - prev_event.jd
                     time_spans[prev_event.type] = this_span
             prev_event = event
-        if prev_event.jd < end:
+        if prev_event and prev_event.jd < end:
             # capture the time we missed when the loop terminated, ie, from last event to `end`
             time_spans[prev_event.type] += end - prev_event.jd
-        if len(time_spans) == 0:
+        if prev_event and len(time_spans) == 0:
             # if no events other than the one indicating starting state, we were in starting state the whole time
             time_spans[prev_event.type] = end - beg
         return time_spans
 
-    def calc_longest_span(self, beg: float, end: float):
+    def calc_longest_span(self, beg: float, end: float) -> str:
         spans = self.calc_time_in_spans(beg, end)
         return max(spans, key=spans.get)
 
@@ -124,6 +152,7 @@ class PhaseEventList:
         If no event exactly at `beg`, first returned event is last event before `beg`, with `jd` & `phase` set to `nan`
         The `event_defs` elements MUST be arranged in order of increasing phase
         """
+
         def calc_phase(t0: float, period: float, time: float) -> float:
             orbit = int((time - t0) / period)
             last_eclipse = t0 + period * orbit
