@@ -4,7 +4,7 @@ import platform
 from typing import Any
 
 import astroplan as ap
-from astropy.coordinates import SkyCoord, get_body, GCRS
+from astropy.coordinates import SkyCoord, get_body
 from astropy.time import Time
 import astropy.units as u
 import itables

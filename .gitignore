@@ -1,2 +1,3 @@
 *.pyc
 test.ipynb
+*.egg-info/
