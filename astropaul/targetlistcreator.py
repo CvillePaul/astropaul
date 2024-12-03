@@ -109,14 +109,17 @@ class TargetList:
         other_lists: dict[str, pd.DataFrame] = {},
     ) -> "TargetList":
         first = first if first else TargetList()
-        answer = TargetList(
-            name=first.name, target_list=first.target_list, column_groups=first.column_groups, other_lists=first.other_lists
-        )
+        answer = first.copy()
         if answer.target_list.empty or answer.target_list is None:
             answer.target_list = target_list
         else:
             answer.target_list = answer.target_list.join(target_list)
-        answer.column_groups = {**answer.column_groups, **column_groups}
+        for name, (primary, secondary) in column_groups.items():
+            if entry := answer.column_groups.get(name, None):
+                entry[0] += primary
+                entry[1] += secondary
+            else:
+                answer.column_groups[name] = (primary, secondary)
         for name, other_list in other_lists.items():
             answer.other_lists[name] = other_list
         return answer
@@ -176,23 +179,23 @@ def concat_dataframe(tl: TargetList, other_df: pd.DataFrame, **kwargs) -> Target
 
 def add_speckle(tl: TargetList, column_prefix="Speckle ", **kwargs) -> TargetList:
     # first, add a column for total observations to main table
-    count_column = f"{column_prefix}Count"
-    speckle_count = pd.read_sql(
+    count_column = f"Num {column_prefix.replace(" ", "")}"
+    num_speckle = pd.read_sql(
         f"""
-        select target_id, count(id) as '{count_column}'
-        from tom_specklerawdata
-        group by target_id
+        select ss.target_id, count(ss.id) as '{count_column}'
+        from tom_specklesession ss
+        group by ss.target_id
         ;
         """,
         kwargs["connection"],
         index_col="target_id",
     )
-    column_groups = {"Speckle Count": ([count_column], [])}
+    column_groups = {"Count": ([count_column], [])}
     # next, add a separate table of all speckle observations
-    speckle = pd.read_sql("select * from tom_specklerawdata", kwargs["connection"], index_col="target_id")
+    speckle = pd.read_sql("select * from tom_specklesession", kwargs["connection"], index_col="target_id")
     new_column_names = {column: f"{column_prefix}{column.capitalize()}" for column in speckle.columns}
     speckle.rename(columns=new_column_names, inplace=True)
-    answer = TargetList.merge(tl, speckle_count, column_groups, {"Speckle": speckle})
+    answer = TargetList.merge(tl, num_speckle, column_groups, {"Speckle": speckle})
     answer.target_list[count_column] = answer.target_list[count_column].fillna(int(0))
     return answer
 
