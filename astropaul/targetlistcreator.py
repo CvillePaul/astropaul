@@ -116,8 +116,7 @@ class TargetList:
             answer.target_list = answer.target_list.join(target_list)
         for name, (primary, secondary) in column_groups.items():
             if entry := answer.column_groups.get(name, None):
-                entry[0] += primary
-                entry[1] += secondary
+                answer.column_groups[name] = (entry[0] + primary, entry[1] + secondary)
             else:
                 answer.column_groups[name] = (primary, secondary)
         for name, other_list in other_lists.items():
@@ -200,9 +199,9 @@ def add_speckle(tl: TargetList, column_prefix="Speckle ", **kwargs) -> TargetLis
     return answer
 
 
-def add_spectra(tl: TargetList, column_prefix="Spectra ", **kwargs) -> TargetList:
+def add_pepsi(tl: TargetList, column_prefix="PEPSI ", **kwargs) -> TargetList:
     # first, add a column for total observations to main table
-    count_column = f"{column_prefix}Count"
+    count_column = f"Num {column_prefix.replace(" ", "")}"
     spectra_count = pd.read_sql(
         f"""
         select target_id, count(id) as '{count_column}'
@@ -212,12 +211,12 @@ def add_spectra(tl: TargetList, column_prefix="Spectra ", **kwargs) -> TargetLis
         kwargs["connection"],
         index_col="target_id",
     )
-    column_groups = {"Spectra Count": ([count_column], [])}
+    column_groups = {"Count": ([count_column], [])}
     # next, add a separate table of all spectra
     spectra = pd.read_sql("select * from tom_spectrumrawdata", kwargs["connection"], index_col="target_id")
     new_column_names = {column: f"{column_prefix}{column.capitalize()}" for column in spectra.columns}
     spectra.rename(columns=new_column_names, inplace=True)
-    answer = TargetList.merge(tl, spectra_count, column_groups, {"Spectra": spectra})
+    answer = TargetList.merge(tl, spectra_count, column_groups, {"PEPSI": spectra})
     answer.target_list[count_column] = answer.target_list[count_column].fillna(int(0))
     return answer
 
