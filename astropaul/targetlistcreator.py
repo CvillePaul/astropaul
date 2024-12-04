@@ -5,12 +5,15 @@ from typing import Any
 
 import astroplan as ap
 from astropy.coordinates import SkyCoord, Angle, get_body
+from astropy.time import Time
 import astropy.units as u
 import itables
 import numpy as np
 import pandas as pd
 
 from astropaul.observing import ObservingSession
+import astropaul.phase as ph
+
 
 class TargetList:
     def __init__(
@@ -191,7 +194,18 @@ def add_speckle(tl: TargetList, column_prefix="Speckle ", **kwargs) -> TargetLis
     )
     column_groups = {"Count": ([count_column], [])}
     # next, add a separate table of all speckle observations
-    speckle = pd.read_sql("select * from tom_specklesession", kwargs["connection"], index_col="target_id")
+    speckle = pd.read_sql(
+        """
+        select t.name 'Target Name', ss.speckle_session Session, ss.num_sequences Sequences, ss.start_jd Start, ss.mid_jd Mid, ss.end_jd End
+        from tom_specklesession ss
+        join tom_target as t on t.id = ss.target_id
+        ;
+        """,
+        kwargs["connection"],
+        index_col="Target Name",
+    )
+    existing_targets = tl.target_list["Target Name"].to_list()
+    speckle = speckle[speckle.index.isin(existing_targets)]
     new_column_names = {column: f"{column_prefix}{column.capitalize()}" for column in speckle.columns}
     speckle.rename(columns=new_column_names, inplace=True)
     answer = TargetList.merge(tl, num_speckle, column_groups, {"Speckle": speckle})
@@ -250,18 +264,18 @@ def add_lists(tl: TargetList, column_prefix="List ", **kwargs) -> TargetList:
 def add_ephemerides(tl: TargetList, column_prefix="Ephem ", **kwargs) -> TargetList:
     ephem = pd.read_sql(
         """
-        select t.id, t.name, bp.system, bp.member, bp.period, bp.t0, bp.duration, bp.depth
+        select t.name "Target Name", bp.system, bp.member, bp.period, bp.t0, bp.duration, bp.depth
         from tom_binaryparameters bp
         join tom_scienceresult sr on sr.id = bp.scienceresult_ptr_id
         join tom_target t on t.id = sr.target_id
         ;""",
         kwargs["connection"],
-        index_col="id",
+        index_col="Target Name",
     )
     existing_targets = tl.target_list["Target Name"]
-    ephem = ephem[ephem["name"].isin(existing_targets)]
+    ephem = ephem[ephem.index.isin(existing_targets)]
     ephem["period"] = ephem["period"] / 3600 / 24  # convert from seconds to days for convenience
-    ephem["duration"] = ephem["duration"] / 3600  # convert from seconds to hours for convenience
+    ephem["duration"] = ephem["duration"] / 3600 / 24  # convert from seconds to days for convenience
     new_column_names = {column: f"{column_prefix}{column.capitalize()}" for column in ephem.columns}
     ephem.rename(columns=new_column_names, inplace=True)
     answer = tl.copy()
@@ -415,4 +429,41 @@ def filter_targets(
         answer.target_list = answer.target_list[~criteria(answer.target_list)]
     else:
         answer.target_list = answer.target_list[criteria(answer.target_list)]
+    return answer
+
+
+def add_speckle_phase(tl: TargetList, phase_event_defs: list[ph.PhaseEventDef], **kwargs) -> TargetList:
+    required_tables = {"Speckle", "Ephem"}
+    if not set(tl.other_lists.keys()).issuperset(required_tables):
+        raise ValueError(f"One or more required table missing: {', '.join(required_tables)}")
+    answer = tl.copy()
+    ephem_table = tl.other_lists["Ephem"]
+    speckle_phases = pd.DataFrame(columns=["Target Name", "Speckle Session", "JD Mid", "UTC Mid", "System", "Member", "State"])
+    for target_name, speckle in tl.other_lists["Speckle"].iterrows():
+        ephem_rows = ephem_table.loc[target_name]
+        if ephem_rows.empty:
+            continue
+        beg, end = speckle["Speckle Start"], speckle["Speckle End"]
+        for _, ephem_row in ephem_rows.sort_values(["Ephem System", "Ephem Member"]).iterrows():
+            ephem = ph.Ephemeris(
+                system=ephem_row["Ephem System"],
+                component=ephem_row["Ephem Member"],
+                t0=ephem_row["Ephem T0"],
+                period=ephem_row["Ephem Period"],
+                duration=ephem_row["Ephem Duration"],
+            )
+            # if ephem.duration != ephem.duration:
+            #     continue # skip rows with nan for duration
+            state = ph.PhaseEventList.calc_phase_events(ephem, phase_event_defs, beg, end).calc_longest_span(beg, end)
+            speckle_phases.loc[len(speckle_phases)] = [
+                target_name,
+                int(speckle["Speckle Session"]),
+                speckle["Speckle Mid"],
+                Time(speckle["Speckle Mid"], format="jd").iso[:18],
+                ephem_row["Ephem System"],
+                ephem_row["Ephem Member"],
+                state,
+            ]
+    if not speckle_phases.empty:
+        answer.other_lists["Speckle Phases"] = speckle_phases
     return answer
