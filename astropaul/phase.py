@@ -76,7 +76,10 @@ def calc_time_of_gress(name: str, ephemeris: Ephemeris, orbit: int, ingress: boo
     :param ingress: If true, calculate time of ingress into eclipse, otherwise, calculate time of egress
     :type ingress: bool """
     t = ephemeris.t0 + orbit * ephemeris.period  # mid eclipse
-    half_duration = ephemeris.duration / 2
+    if ephemeris.duration == ephemeris.duration:
+        half_duration = ephemeris.duration / 2
+    else:
+        half_duration = 0
     phase_change = half_duration / ephemeris.period
     if ingress:
         t += ephemeris.period - half_duration
@@ -162,7 +165,7 @@ class PhaseEventList:
             raise ValueError("Time segment not chronological")
         if not ephem or not event_defs:
             raise ValueError("No parameters can be None")
-        orbit = int((beg - ephem.t0) / ephem.period)
+        orbit = int((beg - ephem.t0) / ephem.period) - 1 # previous orbit helps when window is short & event defs are few
         prev_event = None
         i = 0
         events = []
