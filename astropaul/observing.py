@@ -10,10 +10,10 @@ class ObservingSession:
     def __init__(
         self,
         observer: ap.Observer,
-        observing_segments: list[tuple[Time, Time]] = [],
+        observing_segments: list[tuple[Time, Time]] = None,
     ):
         self.observer = observer
-        self.observing_segments = observing_segments
+        self.observing_segments = observing_segments or []
 
     def __repr__(self):
         if self.observer.name:
