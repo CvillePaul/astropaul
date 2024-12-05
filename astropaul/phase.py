@@ -2,6 +2,7 @@ from collections import defaultdict
 from collections.abc import Callable
 from dataclasses import dataclass, replace
 
+import pandas as pd
 
 @dataclass
 class Ephemeris:
@@ -14,6 +15,8 @@ class Ephemeris:
     duration: float
     # eccentricity: float
 
+    def from_dataframe_row(row: pd.DataFrame) -> "Ephemeris":
+        return Ephemeris(*row[["Ephem System", "Ephem Member", "Ephem T0", "Ephem Period", "Ephem Duration"]])
 
 @dataclass
 class PhaseEvent:

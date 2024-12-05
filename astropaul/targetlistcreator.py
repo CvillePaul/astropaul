@@ -445,15 +445,7 @@ def add_speckle_phase(tl: TargetList, phase_event_defs: list[ph.PhaseEventDef], 
             continue
         beg, end = speckle["Speckle Start"], speckle["Speckle End"]
         for _, ephem_row in ephem_rows.sort_values(["Ephem System", "Ephem Member"]).iterrows():
-            ephem = ph.Ephemeris(
-                system=ephem_row["Ephem System"],
-                component=ephem_row["Ephem Member"],
-                t0=ephem_row["Ephem T0"],
-                period=ephem_row["Ephem Period"],
-                duration=ephem_row["Ephem Duration"],
-            )
-            # if ephem.duration != ephem.duration:
-            #     continue # skip rows with nan for duration
+            ephem = ph.Ephemeris.from_dataframe_row(ephem_row)
             state = ph.PhaseEventList.calc_phase_events(ephem, phase_event_defs, beg, end).calc_longest_span(beg, end)
             speckle_phases.loc[len(speckle_phases)] = [
                 target_name,

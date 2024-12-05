@@ -243,7 +243,7 @@ def calculate_phase_priority(pl: PriorityList, phase_defs: list[ph.PhaseEventDef
                 table["Phase Priority"] = min_priority
             continue
         for _, row in ephem_rows.iterrows():
-            ephem = ph.Ephemeris(*row[["Ephem System", "Ephem Member", "Ephem T0", "Ephem Period", "Ephem Duration"]])
+            ephem = ph.Ephemeris.from_dataframe_row(row)
             session_beg, session_end = pl.session.time_range
             event_list = ph.PhaseEventList.calc_phase_events(ephem, phase_defs, session_beg.jd, session_end.jd)
             # make columns for each system for each observing segment
