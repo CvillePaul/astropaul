@@ -25,14 +25,16 @@ class PhaseEvent:
 
     jd: float  # a value of nan means the event occurred sometime before the current time segment
     system: str
-    component: str
+    member: str
     orbit: int
     type: str
     phase: float
 
     def copy(self) -> "PhaseEvent":
-        return PhaseEvent(self.jd, self.system, self.component, self.orbit, self.type, self.phase)
+        return PhaseEvent(self.jd, self.system, self.member, self.orbit, self.type, self.phase)
 
+    def to_list(self) -> list:
+        return [self.system, self.member, self.orbit, self.jd, self.phase, self.type]
 
 @dataclass
 class PhaseEventDef:
@@ -56,7 +58,7 @@ def calc_time_of_phase(name: str, ephemeris: Ephemeris, orbit: int, phase: float
     return PhaseEvent(
         jd=ephemeris.t0 + orbit * ephemeris.period + phase * ephemeris.period,
         system=ephemeris.system,
-        component=ephemeris.component,
+        member=ephemeris.component,
         orbit=orbit,
         type=name,
         phase=phase,
@@ -90,7 +92,7 @@ def calc_time_of_gress(name: str, ephemeris: Ephemeris, orbit: int, ingress: boo
     else:
         t += half_duration
         phase = phase_change
-    return PhaseEvent(jd=t, system=ephemeris.system, component=ephemeris.component, orbit=orbit, type=name, phase=phase)
+    return PhaseEvent(jd=t, system=ephemeris.system, member=ephemeris.component, orbit=orbit, type=name, phase=phase)
 
 
 class PhaseEventList:
