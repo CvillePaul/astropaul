@@ -17,11 +17,13 @@ class ObservingSession:
 
     def __repr__(self):
         if self.observer.name:
-            answer = f"{self.observer.name}"
+            answer = f"{self.observer.name} "
         else:
-            answer = f"Site ({self.observer.latitude.value:.3f}, {self.observer.longitude.value:.3f})"
+            answer = "Site "
+        answer += f"({self.observer.latitude.value:+.3f}, {self.observer.longitude.value:+.3f})"
         answer += f" in {self.observer.timezone}\n"
         if self.observing_segments:
+            answer += "Observing segments:\n"
             for beg, end in self.observing_segments:
                 answer += f"    {beg.iso[:19]} to {end.iso[:19]}\n"
         else:
