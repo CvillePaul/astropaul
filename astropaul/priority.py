@@ -1,6 +1,5 @@
 from datetime import datetime
 import operator
-import platform
 from typing import Any
 
 import astroplan as ap
@@ -11,38 +10,9 @@ import itables
 import numpy as np
 import pandas as pd
 
+from astropaul.html import dataframe_to_datatable
 import astropaul.targetlistcreator as tlc
 import astropaul.phase as ph
-
-
-def dataframe_to_datatable(table: pd.DataFrame, table_name: str = "table", caption: str = "", table_options: dict = {}):
-    default_options = {
-        "connected": True,
-        "paging": False,
-        "maxBytes": 0,
-        "maxColumns": 0,
-        "autoWidth": False,
-        "layout": {"topStart": None, "topEnd": None, "bottomStart": None, "bottomEnd": None},
-        "classes": "compact cell-border hover",
-    }
-    if caption == "":
-        caption = f"Created {datetime.now().astimezone().isoformat(sep=" ", timespec="seconds")} on {platform.node()}"
-    html = itables.to_html_datatable(df=table, caption=caption, table_id=table_name, **{**default_options, **table_options})
-    html += f"""
-        <style>
-        td {{text-align: center}}
-        #{table_name} th {{
-            white-space: normal;
-            word-wrap: break-word;
-            text-align: center;
-        }}
-        caption {{
-            text-align: left;
-            font-style: italic;
-        }}
-        </style>
-        """
-    return html
 
 
 class PriorityList:
@@ -236,8 +206,9 @@ def calculate_phase_priority(pl: PriorityList, phase_defs: list[ph.PhaseEventDef
     ephem_table = pl.target_list.other_lists["Ephem"]
     min_priority = min(phase_categories, key=operator.itemgetter(1))
     for target, table_list in pl.target_tables.items():
-        ephem_rows = ephem_table[(ephem_table["Ephem Name"] == target) & (ephem_table["Ephem Member"] == "a")]
-        if len(ephem_rows) < 2:
+        ephem_rows = ephem_table.loc[target]
+        ephem_rows = ephem_rows[ephem_rows["Ephem Member"] == "a"]
+        if ephem_rows.empty or len(ephem_rows) < 2:
             # flunk anything that doesn't have at least two binaries
             for table in table_list:
                 table["Phase Priority"] = min_priority
