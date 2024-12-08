@@ -11,6 +11,7 @@ import itables
 import numpy as np
 import pandas as pd
 
+from astropaul import html
 from astropaul.observing import ObservingSession
 import astropaul.phase as ph
 
@@ -52,9 +53,9 @@ class TargetList:
         answer += "Column Count (primary, secondary):\n"
         for name, (primary, secondary) in self.column_groups.items():
             answer += f"    {name}: ({len(primary)}, {len(secondary)})\n"
-        answer += "Other tables sizes:\n"
+        answer += "Associated tables:\n"
         for name, other in self.other_lists.items():
-            answer += f"    {len(other):4d} {name} ({len(other.columns)} cols)\n"
+            answer += f"    {len(other):4d} rows, {len(other.columns):2d} columns: {name}\n"
         return answer
 
     def to_html(self, file: str = None) -> str:
@@ -283,6 +284,30 @@ def add_ephemerides(tl: TargetList, column_prefix="Ephem ", **kwargs) -> TargetL
     return answer
 
 
+def add_phase_events(
+    tl: TargetList, observing_session: ObservingSession, phase_event_defs: list[ph.PhaseEventDef], **kwargs
+) -> TargetList:
+    """Calculate what phase events are in effect for each observing segment"""
+    if (ephem_table := tl.other_lists.get("Ephem", None)).empty:
+        raise ValueError("Ephem table not present")
+    answer = tl.copy()
+    ephems = {}
+    phase_events = pd.DataFrame(columns=["Target Name", "System", "Member", "Orbit Num", "Event JD", "Phase", "Event", "Event UTC"])
+    for target_name, ephem_row in ephem_table.sort_values(["Ephem System", "Ephem Member"]).iterrows():
+        ephem = ph.Ephemeris.from_dataframe_row(ephem_row)
+        ephems[target_name] = ephems.get(target_name, []) + [ephem]
+    for (beg, end) in observing_session.observing_segments:
+        for target_name, ephem_list in ephems.items():
+            for ephem in ephem_list:
+                event_list = ph.PhaseEventList.calc_phase_events(ephem, phase_event_defs, beg.jd, end.jd)
+                for event in event_list.events:
+                    if event.jd != event.jd:
+                        event.jd = beg.jd # fix nan jd value for events in effect at start of segment
+                    phase_events.loc[len(phase_events)] = [target_name] + event.to_list() + [Time(event.jd, format="jd").iso[:19]]
+    answer.other_lists["Phase Events"] = phase_events
+    return answer
+
+
 def add_tess(tl: TargetList, column_prefix="TESS ", **kwargs) -> TargetList:
     tess = pd.read_sql(
         """
@@ -433,6 +458,7 @@ def filter_targets(
 
 
 def add_speckle_phase(tl: TargetList, phase_event_defs: list[ph.PhaseEventDef], **kwargs) -> TargetList:
+    """Calculate what PhaseEventDef was most in effect during a speckle observation"""
     required_tables = {"Speckle", "Ephem"}
     if not set(tl.other_lists.keys()).issuperset(required_tables):
         raise ValueError(f"One or more required table missing: {', '.join(required_tables)}")
