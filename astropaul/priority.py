@@ -202,6 +202,55 @@ def calculate_prior_observation_priority(pl: PriorityList, prior_observation_cat
     pass
 
 
+def calculate_eclipse_priority(
+    pl: PriorityList,
+    in_eclipse_name: str = "Eclipse",
+    out_eclipse_name="Not in Eclipse",
+    no_eclipse_score: float = 0.2,
+) -> None:
+    """Favor targets that undergo a full ingress/eclipse/egress during an observing segment"""
+    required_table = "Phase Events"
+    phase_events = pl.target_list.other_lists.get(required_table, pd.DataFrame())
+    if phase_events.empty:
+        raise ValueError(f"TargetList does not have a {required_table} table")
+    eclipse_pattern = [out_eclipse_name, in_eclipse_name, out_eclipse_name]
+    for _, row in pl.target_list.target_list.iterrows():
+        target_name = row["Target Name"]
+        target_events = phase_events[phase_events["Target Name"] == target_name]
+        target_eclipses = []
+        for (system, member), group in target_events.groupby(["System", "Member"]):
+            if group.empty or len(group) < len(eclipse_pattern):
+                continue
+            times = []
+            for _, event in group.sort_values("Event JD").iterrows():
+                if event["Event"] == eclipse_pattern[len(times)]:
+                    times.append(event["Event JD"])
+                    if len(times) == len(eclipse_pattern):
+                        break
+                    continue
+            if len(times) == len(eclipse_pattern):
+                beg = Time(times[1], format="jd").to_datetime()
+                end = Time(times[2], format="jd").to_datetime()
+                target_eclipses.append((system, member, beg, end))
+        system_columns = {system: f"Full {system} Eclipse" for system, _ in target_events.groupby("System")}
+        if len(system_columns) == 0:
+            continue
+        # add columns to the segment table indicating the member in eclipse for each system
+        for segment_table in pl.target_tables[target_name]:
+            for col_name in system_columns.values():
+                segment_table[col_name] = ""
+            segment_beg = segment_table.index[0]
+            segment_end = segment_table.index[-1]
+            for system, member, beg, end in target_eclipses:
+                if segment_beg <= beg and end <= segment_end:
+                    beg_index = segment_table.index[segment_table.index <= beg].max()
+                    end_index = segment_table.index[segment_table.index >= end].min()
+                    segment_table.loc[beg_index:end_index, system_columns[system]] = f"{system}{member}"
+            # set the eclipse priority based on the eclipse status of each system's column
+            segment_table["Eclipse Priority"] = no_eclipse_score
+            segment_table.loc[segment_table[system_columns.values()].sum(axis=1).str.len() == 2, "Eclipse Priority"] = 1.0
+
+
 def calculate_phase_priority(pl: PriorityList, phase_defs: list[ph.PhaseEventDef], phase_categories: dict[str, float]) -> None:
     ephem_table = pl.target_list.other_lists["Ephem"]
     min_priority = min(phase_categories, key=operator.itemgetter(1))
