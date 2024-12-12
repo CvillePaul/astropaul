@@ -249,7 +249,7 @@ def calculate_eclipse_priority(
         # add columns to the segment table indicating the member in eclipse for each system
         system_columns = {system: f"Full {system} Eclipse" for system, _ in target_events.groupby("System")}
         if len(system_columns) == 0:
-            continue # skip if none of the systems ever have an eclipse
+            continue  # skip if none of the systems ever have an eclipse
         for segment_table in pl.target_tables[target_name]:
             for col_name in system_columns.values():
                 segment_table[col_name] = ""
@@ -294,16 +294,13 @@ def calculate_phase_priority(pl: PriorityList, phase_defs: list[ph.PhaseEventDef
             table["Phase Priority"] = overall_priorities
 
 
-def calculate_overall_priority(pl: PriorityList, weightings: dict[str, float]) -> None:
-    # uncomment lines in order to switch to weighted sum priorities instead of multiplicative priorities
-    # norm_factor = np.sum([weight for weight in weightings.values()])
+def calculate_overall_priority(pl: PriorityList) -> None:
     for table_list in pl.target_tables.values():
         for table in table_list:
-            table["Overall Priority"] = 1  # 0
-            for col, weight in weightings.items():
-                table["Overall Priority"] *= table[f"{col} Priority"] * weight
-                # table["Overall Priority"] += table[f"{col} Priority"]  * weight
-            # table["Overall Priority"] /= norm_factor
+            priority_columns = [col for col in table.columns if col.endswith(" Priority")]
+            table["Overall Priority"] = 1
+            for col in priority_columns:
+                table["Overall Priority"] *= table[col]
 
 
 def aggregate_target_priorities(pl: PriorityList, skip_column_threshold: float = 0) -> None:
