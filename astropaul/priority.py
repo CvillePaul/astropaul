@@ -216,6 +216,7 @@ def calculate_eclipse_priority(
     eclipse_pattern = [out_eclipse_name, in_eclipse_name, out_eclipse_name]
     for _, row in pl.target_list.target_list.iterrows():
         target_name = row["Target Name"]
+        # figure out all the full eclipses that happen for this target
         target_events = phase_events[phase_events["Target Name"] == target_name]
         target_eclipses = []
         for (system, member), group in target_events.groupby(["System", "Member"]):
@@ -232,10 +233,23 @@ def calculate_eclipse_priority(
                 beg = Time(times[1], format="jd").to_datetime()
                 end = Time(times[2], format="jd").to_datetime()
                 target_eclipses.append((system, member, beg, end))
+        # if two eclipses overlap or one surrounds the other, remove both
+        for i in range(len(target_eclipses)):
+            system_1, _, beg_1, end_1 = target_eclipses[i]
+            if system_1 == "":
+                continue
+            for j in range(i + 1, len(target_eclipses)):
+                system_2, _, beg_2, end_2 = target_eclipses[j]
+                if system_2 == "":
+                    continue
+                if beg_1 <= beg_2 <= end_1 or beg_1 <= end_2 <= end_1:
+                    target_eclipses[i] = ("", "", beg_1, end_1)
+                    target_eclipses[j] = ("", "", beg_2, end_2)
+        target_eclipses = [x for x in target_eclipses if x[0] != ""]
+        # add columns to the segment table indicating the member in eclipse for each system
         system_columns = {system: f"Full {system} Eclipse" for system, _ in target_events.groupby("System")}
         if len(system_columns) == 0:
-            continue
-        # add columns to the segment table indicating the member in eclipse for each system
+            continue # skip if none of the systems ever have an eclipse
         for segment_table in pl.target_tables[target_name]:
             for col_name in system_columns.values():
                 segment_table[col_name] = ""
