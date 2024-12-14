@@ -6,7 +6,6 @@ import astroplan as ap
 from astropy.coordinates import SkyCoord, get_body
 from astropy.time import Time
 import astropy.units as u
-import itables
 import numpy as np
 import pandas as pd
 
@@ -207,6 +206,7 @@ def calculate_eclipse_priority(
     in_eclipse_name: str = "Eclipse",
     out_eclipse_name="Not in Eclipse",
     no_eclipse_score: float = 0.2,
+    min_altitude: u.Quantity = 30 * u.deg,
 ) -> None:
     """Favor targets that undergo a full ingress/eclipse/egress during an observing segment"""
     required_table = "Phase Events"
@@ -259,7 +259,8 @@ def calculate_eclipse_priority(
                 if segment_beg <= beg and end <= segment_end:
                     beg_index = segment_table.index[segment_table.index <= beg].max()
                     end_index = segment_table.index[segment_table.index >= end].min()
-                    segment_table.loc[beg_index:end_index, system_columns[system]] = f"{system}{member}"
+                    if segment_table.loc[beg_index:end_index, "Altitude Value"].min() >= min_altitude.value:
+                        segment_table.loc[beg_index:end_index, system_columns[system]] = f"{system}{member}"
             # set the eclipse priority based on the eclipse status of each system's column
             segment_table["Eclipse Priority"] = no_eclipse_score
             segment_table.loc[segment_table[system_columns.values()].sum(axis=1).str.len() == 2, "Eclipse Priority"] = 1.0
@@ -316,12 +317,16 @@ def aggregate_target_priorities(pl: PriorityList, skip_column_threshold: float =
     target_list = pl.target_list.target_list
     # each observing segment might have a different list of targets, so sorting by RA needs to happen per observing segment
     for sub_segments, aggregate_table in zip(pl.segments, aggregate_tables):
-        this_target_list = target_list[target_list["Target Name"].isin(aggregate_table.columns)].sort_values("ra")
-        target_names = this_target_list["Target Name"].tolist()
+        segment_target_list = target_list[target_list["Target Name"].isin(aggregate_table.columns)].sort_values("ra")
+        target_names = segment_target_list["Target Name"].tolist()
         # calculate LST at beginning of this observing segment
         lst = pl.session.observer.local_sidereal_time(sub_segments[0][0]).to(u.deg).value
         first_ra_of_night = lst - 60  # lst is the RA at 90 deg alt, we want targets at 30 deg alt
         # now "pivot" the table so the first column is the RA
-        i = next(i for i, ra in enumerate(this_target_list["ra"].tolist()) if ra > first_ra_of_night)  # 1st viewable target
+        i = 0
+        for _, target in segment_target_list.iterrows():
+            if target["ra"] > first_ra_of_night:
+                break
+            i += 1
         target_names = target_names[i:] + target_names[:i]  # "rotate" the list so first ra is one > lst
         pl.numerical_priorities.append(aggregate_table[target_names])
