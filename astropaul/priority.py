@@ -213,6 +213,10 @@ def calculate_eclipse_priority(
     phase_events = pl.target_list.other_lists.get(required_table, pd.DataFrame())
     if phase_events.empty:
         raise ValueError(f"TargetList does not have a {required_table} table")
+    altitude_column = "Altitude Value"
+    if pl.target_tables:
+        if not altitude_column in next(iter(pl.target_tables.values()))[0].columns:
+            raise ValueError(f"Required column {altitude_column} not in existing target tables")
     eclipse_pattern = [out_eclipse_name, in_eclipse_name, out_eclipse_name]
     for _, row in pl.target_list.target_list.iterrows():
         target_name = row["Target Name"]
@@ -259,7 +263,7 @@ def calculate_eclipse_priority(
                 if segment_beg <= beg and end <= segment_end:
                     beg_index = segment_table.index[segment_table.index <= beg].max()
                     end_index = segment_table.index[segment_table.index >= end].min()
-                    if segment_table.loc[beg_index:end_index, "Altitude Value"].min() >= min_altitude.value:
+                    if segment_table.loc[beg_index:end_index, altitude_column].min() >= min_altitude.value:
                         segment_table.loc[beg_index:end_index, system_columns[system]] = f"{system}{member}"
             # set the eclipse priority based on the eclipse status of each system's column
             segment_table["Eclipse Priority"] = no_eclipse_score
