@@ -36,6 +36,7 @@ def dataframe_to_datatable(
         table_options = {}
     if caption == "":
         caption = f"Created {datetime.now().astimezone().isoformat(sep=" ", timespec="seconds")} on {platform.node()}"
+    table_name = table_name.replace(" ", "_")
     html = itables.to_html_datatable(df=table, caption=caption, table_id=table_name, **{**default_options, **table_options})
     html += f"""
         <style>
@@ -56,9 +57,9 @@ def dataframe_to_datatable(
 
 def render_observing_pages(tl: tlc.TargetList, pl: pr.PriorityList, dir: str = "html") -> str:
     # wipe out contents of dir
-    for file in os.listdir(dir):
-        file_path = os.path.join(dir, file)
-        os.unlink(file_path)
+    # for file in os.listdir(dir):
+    #     file_path = os.path.join(dir, file)
+    #     os.unlink(file_path)
 
     # make overall summary page that links to all the other pages
     with dominate.document(title="Observing Files") as d:
@@ -79,7 +80,7 @@ def render_observing_pages(tl: tlc.TargetList, pl: pr.PriorityList, dir: str = "
             )
             time_range = pl.session.time_range
             tags.tr(
-                tags.td("Segments"),
+                tags.td("Observing Segments"),
                 tags.td(len(pl.segments)),
                 # tags.td(util.raw(f"{len(pl.segments)} total<br>{time_range[0].iso[:19]} start<br>{time_range[1].iso[:19]} end")),
             )
@@ -116,12 +117,12 @@ def render_observing_pages(tl: tlc.TargetList, pl: pr.PriorityList, dir: str = "
                     tags.td(tags.a("Categorical", href=f"Categorical Priorities {beg.iso[:10]}.html")),
                 )
         d += t
-        with open(f"{dir}/Target List {tl.name}.html", "w") as f:
+        with open(f"{dir}/index.html", "w") as f:
             f.write(d.render())
 
     # make page for target list
     tltl = tl.target_list.copy()
-    tltl["Target Name"] = [f'<a href="{target_name}.html">{target_name}</a>' for target_name in tltl["Target Name"]]
+    tltl["Target Name"] = [f'<a href="targets/{target_name}.html">{target_name}</a>' for target_name in tltl["Target Name"]]
     title = tl.name
     with dominate.document(title=title) as d:
         d += tags.h1(title, style="text-align: center")
@@ -164,7 +165,7 @@ def render_observing_pages(tl: tlc.TargetList, pl: pr.PriorityList, dir: str = "
             with dominate.document(title=title) as d:
                 d += tags.h1(title, style="text-align: center")
                 d += tags.p(util.raw(dataframe_to_datatable(tt, "Target_Scores", table_options={"sort": False})))
-                with open(f"{dir}/Target Scores {target} {start_utc}.html", "w") as f:
+                with open(f"{dir}/target scores/Target Scores {target} {start_utc}.html", "w") as f:
                     f.write(d.render())
 
     # make pages for numerical priorities
@@ -178,7 +179,7 @@ def render_observing_pages(tl: tlc.TargetList, pl: pr.PriorityList, dir: str = "
                 pt[col] = [
                     val if val < threshold else f'<span style="background-color: #EBF4FA">{val:.3f}</span>' for val in pt[col]
                 ]
-            pt.columns = [f'<a href="Target Scores {target} {start_utc}.html">{target}</a>' for target in pt.columns]
+            pt.columns = [f'<a href="target scores/Target Scores {target} {start_utc}.html">{target}</a>' for target in pt.columns]
             title = f"{start_utc} Numerical Priorities"
             with dominate.document(title=title) as d:
                 d += tags.h1(title, style="text-align: center")
@@ -190,6 +191,7 @@ def render_observing_pages(tl: tlc.TargetList, pl: pr.PriorityList, dir: str = "
     if pl.categorical_priorities:
         for categories_table in pl.categorical_priorities:
             ct = categories_table.copy()  # make a copy we can alter for formatting purposes
+            start_utc = f"{ct.index[0]:%Y-%m-%d}"
             ct.index = [f"{time:%H:%M}" for time in ct.index]
             highlight_value = "* * *"
             for col in ct.columns:
@@ -248,5 +250,5 @@ def render_observing_pages(tl: tlc.TargetList, pl: pr.PriorityList, dir: str = "
                     entries = ot[ot["Target Name"] == target_name].drop("Target Name", axis=1)
                 if not entries.empty:
                     d += util.raw(entries.style.set_table_styles(table_styles).to_html())
-            with open(f"{dir}/{target_name}.html", "w") as f:
+            with open(f"{dir}/targets/{target_name}.html", "w") as f:
                 f.write(d.render())
