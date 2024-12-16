@@ -1,4 +1,3 @@
-from datetime import datetime
 import operator
 from typing import Any
 
@@ -9,7 +8,6 @@ import astropy.units as u
 import numpy as np
 import pandas as pd
 
-from astropaul.html import dataframe_to_datatable
 import astropaul.targetlistcreator as tlc
 import astropaul.phase as ph
 
@@ -34,7 +32,7 @@ class PriorityList:
                 tables.append(table)
             self.target_tables[target] = tables
         self.numerical_priorities: list[pd.DataFrame] = None
-        self.categorized_priorities: list[pd.DataFrame] = None
+        self.categorical_priorities: list[pd.DataFrame] = None
         self.category_bins = None
         self.category_labels = None
 
@@ -47,100 +45,12 @@ class PriorityList:
             raise ValueError("Overall numerical priorities have not been calculated yet")
         self.category_bins = bins
         self.category_labels = labels
-        self.categorized_priorities = []
+        self.categorical_priorities = []
         for numerical_priority in self.numerical_priorities:
             category_table = numerical_priority.apply(
                 lambda col: pd.cut(col, bins=bins, labels=labels, ordered=False, include_lowest=True)
             )
-            self.categorized_priorities.append(category_table)
-
-    def to_html(self, file_base: str = "Priorities", dir: str = "."):
-        segment_starts = [segment[0][0].iso[:10] for segment in self.segments]
-        table_options = {"search": False, "sort": False}
-        # make a page for each target's priority scores
-        for target, target_table_list in self.target_tables.items():
-            for start_utc, target_table in zip(segment_starts, target_table_list):
-                tt = target_table.copy()
-                tt.index = [f"{time:%H:%M}" for time in tt.index]
-                target_html = f'<h1 style="text-align: center">{start_utc} Target Scores for {target}</h1>\n'
-                target_html += dataframe_to_datatable(tt, "targetPriority", table_options=table_options)
-                with open(f"{dir}/Target {file_base} {target} {start_utc}.html", "w") as f:
-                    f.write(target_html)
-        # make a page for numerical priorities for each observing segment
-        if self.numerical_priorities:
-            for start_utc, priority_table in zip(segment_starts, self.numerical_priorities):
-                pt = priority_table.copy()
-                pt.index = [f"{time:%H:%M}" for time in pt.index]
-                threshold = self.category_bins[-2]
-                for col in pt.columns:
-                    pt[col] = [
-                        val if val < threshold else f'<p style="background-color: #EBF4FA">{val:.3f}</p>' for val in pt[col]
-                    ]
-                pt.columns = [f'<a href="Target {file_base} {target} {start_utc}.html">{target}</a>' for target in pt.columns]
-                numerical_html = f'<h1 style="text-align: center">{start_utc} Target Priorities</h1>\n'
-                numerical_html += dataframe_to_datatable(pt, "numericalPriority", table_options=table_options)
-                with open(f"{dir}/Numerical {file_base} {start_utc}.html", "w") as f:
-                    f.write(numerical_html)
-        # make a page for categorized priorities for each observing segment
-        if self.categorized_priorities:
-            for start_utc, categories_table in zip(segment_starts, self.categorized_priorities):
-                ct = categories_table.copy()  # make a copy we can alter for formatting purposes
-                ct.index = [f"{time:%H:%M}" for time in ct.index]
-                list_targets = self.target_list.target_list
-                # not all targets on list have nonzero priority, so we need a list of targets for this particular segment
-                segment_targets = list_targets[list_targets["Target Name"].isin(ct.columns)]
-                # add some helpful informational rows to the top of the chart
-                ct.loc["RA"] = [
-                    segment_targets[segment_targets["Target Name"] == col]["RA"].values[0][:8] for col in ct.columns
-                ]
-                ct.loc["Dec"] = [
-                    segment_targets[segment_targets["Target Name"] == col]["Dec"].values[0][:9] for col in ct.columns
-                ]
-                ct.loc["Teff"] = [
-                    f"{segment_targets[segment_targets["Target Name"] == col]["Teff"].values[0]:.0f}" for col in ct.columns
-                ]
-                new_ordering = [*ct.index[-3:], *ct.index[:-3]]
-                ct = ct.reindex(new_ordering)
-                # elide the target names to first 4 digits
-                ct.columns = [col[:8] + "..." for col in ct.columns]
-                # generate html version of the chart
-                categorized_html = f'<h1 style="text-align: center">{start_utc} Target Priorities</h1>\n'
-                categorized_html += dataframe_to_datatable(ct, "categorizedPriority", table_options=table_options)
-                with open(f"{dir}/Categorical {file_base} {start_utc}.html", "w") as f:
-                    f.write(categorized_html)
-        # make summary page
-        summary_html = f"<h1>{self.target_list.name}</h1>\n"
-        summary_html += '<table cellpadding="10" border="1">\n'
-        summary_html += (
-            f"<tr><td>Observatory</td><td>{self.session.observer.name}, {self.session.observer.timezone}</td></tr>\n"
-        )
-        summary_html += (
-            f'<tr><td>Target List</td><td><a href="{self.target_list.name}.html">{self.target_list.name}</a></td></tr>\n'
-        )
-        summary_html += (
-            f'<tr><td>Session Start</td><td style="font-family: monospace">{self.session.time_range[0].iso}</td></tr><br>\n'
-        )
-        summary_html += (
-            f'<tr><td>Session Finish</td><td style="font-family: monospace">{self.session.time_range[1].iso}</td></tr><br>\n'
-        )
-        summary_html += f"<tr><td>Table Interval</td><td>{self.interval}</td></tr>\n"
-        summary_html += "</table><br>\n"
-        summary_html += "<h2>Target List Summary</h2>\n"
-        summary_html += '<pre style="font-family: monospace">\n'
-        summary_html += self.target_list.summarize()
-        summary_html += "</pre>\n"
-        summary_html += "<br><br><h2>Observing Segments</h2>\n"
-        summary_html += '<table cellpadding="10" style="text-align: center;">'
-        summary_html += "    <tr><th>Start</th><th>Finish</th><th>Numerical Priorities</th><th>Categorical Priorities</th></tr>"
-        for segment, segment_start in zip(self.segments, segment_starts):
-            summary_html += "<tr>"
-            summary_html += f"<td>{segment[0][0].iso[:19]}</td><td>{segment[-1][1].iso[:19]}</td>"
-            summary_html += f'<td><a href="Numerical {file_base} {segment_start}.html">Link</a></td>'
-            summary_html += f'<td><a href="Categorical {file_base} {segment_start}.html">Link</a></td>'
-            summary_html += "</tr>\n"
-        summary_html += "</table>\n"
-        with open(f"{dir}/Summary {self.target_list.name}.html", "w") as f:
-            f.write(summary_html)
+            self.categorical_priorities.append(category_table)
 
 
 CategoryTable = list[tuple[tuple[Any, Any], Any]]
