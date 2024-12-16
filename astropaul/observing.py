@@ -16,18 +16,34 @@ class ObservingSession:
         self.observing_segments = observing_segments or []
 
     def __repr__(self):
+        answer = self.site_info + "\n"
+        if self.observing_segments:
+            answer += f"{self.total_time.to(u.hour):.1f} total observing time\n"
+            answer += "Observing segments:\n"
+            num_segments = len(self.observing_segments)
+            if num_segments < 10:
+                for beg, end in self.observing_segments:
+                    answer += f"    {beg.iso[:19]} to {end.iso[:19]}\n"
+            else:
+                answer += f"{num_segments} segments, from {self.observing_segments[0][0].iso[:19]} to {self.observing_segments[-1][-1].iso[:19]}\n"
+        else:
+            answer += "No observing segments defined\n"
+        return answer
+    @property
+    def site_info(self) -> str:
         if self.observer.name:
             answer = f"{self.observer.name} "
         else:
             answer = "Site "
         answer += f"({self.observer.latitude.value:+.3f}, {self.observer.longitude.value:+.3f})"
-        answer += f" in {self.observer.timezone}\n"
-        if self.observing_segments:
-            answer += "Observing segments:\n"
-            for beg, end in self.observing_segments:
-                answer += f"    {beg.iso[:19]} to {end.iso[:19]}\n"
-        else:
-            answer += "No observing segments defined\n"
+        answer += f" timezone {self.observer.timezone}"
+        return answer
+
+    @property
+    def total_time(self) -> Time:
+        answer = 0 * u.hour
+        for beg, end in self.observing_segments:
+            answer += end - beg
         return answer
 
     @property
