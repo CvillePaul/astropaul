@@ -55,7 +55,7 @@ def dataframe_to_datatable(
     return html
 
 
-def render_observing_pages(tl: tlc.TargetList, pl: pr.PriorityList, dir: str = "html") -> str:
+def render_observing_pages(tl: tlc.TargetList, pl: pr.PriorityList, other_files: dict[str, str], dir: str = "html") -> str:
     # wipe out contents of dir
     # for file in os.listdir(dir):
     #     file_path = os.path.join(dir, file)
@@ -102,6 +102,18 @@ def render_observing_pages(tl: tlc.TargetList, pl: pr.PriorityList, dir: str = "
                 )
         d += t
         d += tags.br()
+        # output information about other files
+        if other_files:
+            d += tags.h2("Other Files")
+            for file_type, contents in other_files.items():
+                with dominate.document(title=file_type) as od:
+                    od += tags.pre(contents)
+                    with open(f"{dir}/{file_type}.html", "w") as f:
+                        f.write(od.render())
+                d += tags.span(f"{file_type}: ", tags.a("Contents", href=f"{file_type}.html"))
+                d += tags.br()
+            d += tags.br()
+                
         # output information about target priorities
         d += tags.h2(f"Priorities ({pl.interval} interval)")
         t = tags.table(border=border, cellpadding=padding)
@@ -163,7 +175,7 @@ def render_observing_pages(tl: tlc.TargetList, pl: pr.PriorityList, dir: str = "
             tt.index = [f"{time:%H:%M}" for time in tt.index]
             title = f"{start_utc} Target Scores for {target}"
             with dominate.document(title=title) as d:
-                d += tags.h1(title, style="text-align: center")
+                d += tags.h1("Target Scores for", tags.a(target, href=f"../targets/{target}.html"), style="text-align: center")
                 d += tags.p(util.raw(dataframe_to_datatable(tt, "Target_Scores", table_options={"sort": False})))
                 with open(f"{dir}/target scores/Target Scores {target} {start_utc}.html", "w") as f:
                     f.write(d.render())
@@ -208,7 +220,8 @@ def render_observing_pages(tl: tlc.TargetList, pl: pr.PriorityList, dir: str = "
             ct.loc["Teff"] = [
                 f"{segment_targets[segment_targets["Target Name"] == col]["Teff"].values[0]:.0f}" for col in ct.columns
             ]
-            new_ordering = [*ct.index[-3:], *ct.index[:-3]]
+            ct.loc["RV Standard"] = [segment_targets[segment_targets["Target Name"] == col]["RV Standard"].values[0] for col in ct.columns]
+            new_ordering = [*ct.index[-4:], *ct.index[:-4]]
             ct = ct.reindex(new_ordering)
             # elide the target names to first 4 digits
             ct.columns = [col[:8] + "..." for col in ct.columns]
@@ -249,6 +262,6 @@ def render_observing_pages(tl: tlc.TargetList, pl: pr.PriorityList, dir: str = "
                 else:
                     entries = ot[ot["Target Name"] == target_name].drop("Target Name", axis=1)
                 if not entries.empty:
-                    d += util.raw(entries.style.set_table_styles(table_styles).to_html())
+                    d += util.raw(entries.style.hide(axis="index").set_table_styles(table_styles).to_html())
             with open(f"{dir}/targets/{target_name}.html", "w") as f:
                 f.write(d.render())
