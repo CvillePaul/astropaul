@@ -1,17 +1,13 @@
 import collections
-import datetime
-import platform
 from typing import Any
 
 import astroplan as ap
 from astropy.coordinates import SkyCoord, Angle, get_body
 from astropy.time import Time
 import astropy.units as u
-import itables
 import numpy as np
 import pandas as pd
 
-from astropaul import html
 from astropaul.observing import ObservingSession
 import astropaul.phase as ph
 
@@ -59,50 +55,51 @@ class TargetList:
         return answer
 
     def to_html(self, file: str = None) -> str:
-        buttons = [
-            {
-                "extend": "columnToggle",
-                "columns": [f"{col}:title" for col in secondary_cols],
-                "text": group,
-                "redrawCalculations": True,
-            }
-            for group, (_, secondary_cols) in self.column_groups.items()
-            if secondary_cols
-        ]
-        table_name = "targetList"
-        caption = f"{self.name}, created {datetime.datetime.now().astimezone().isoformat(sep=" ", timespec="seconds")} on {platform.node()}"
-        html = f'<h1 style="text-align: center">{self.name}</h1>\n'
-        html += itables.to_html_datatable(
-            self.target_list,
-            caption=caption,
-            table_id=table_name,
-            connected=True,
-            paging=False,
-            showIndex=False,
-            maxBytes=0,
-            maxColumns=0,
-            autoWidth=False,
-            layout={"topStart": {"searchBuilder": True, "buttons": buttons}},
-            classes="display nowrap compact cell-border",
-            # columnDefs=[{"targets": ["Target Source:title"], "visible": False}],
-        )
-        html += f"""
-            <style>
-            #{table_name} th {{
-                white-space: normal;
-                word-wrap: break-word;
-            }}
-            caption {{
-                text-align: left;
-                font-style: italic;
-            }}
-            </style>
-            """
+        return ""
+        # buttons = [
+        #     {
+        #         "extend": "columnToggle",
+        #         "columns": [f"{col}:title" for col in secondary_cols],
+        #         "text": group,
+        #         "redrawCalculations": True,
+        #     }
+        #     for group, (_, secondary_cols) in self.column_groups.items()
+        #     if secondary_cols
+        # ]
+        # table_name = "targetList"
+        # caption = f"{self.name}, created {datetime.datetime.now().astimezone().isoformat(sep=" ", timespec="seconds")} on {platform.node()}"
+        # html = f'<h1 style="text-align: center">{self.name}</h1>\n'
+        # html += itables.to_html_datatable(
+        #     self.target_list,
+        #     caption=caption,
+        #     table_id=table_name,
+        #     connected=True,
+        #     paging=False,
+        #     showIndex=False,
+        #     maxBytes=0,
+        #     maxColumns=0,
+        #     autoWidth=False,
+        #     layout={"topStart": {"searchBuilder": True, "buttons": buttons}},
+        #     classes="display nowrap compact cell-border",
+        #     # columnDefs=[{"targets": ["Target Source:title"], "visible": False}],
+        # )
+        # html += f"""
+        #     <style>
+        #     #{table_name} th {{
+        #         white-space: normal;
+        #         word-wrap: break-word;
+        #     }}
+        #     caption {{
+        #         text-align: left;
+        #         font-style: italic;
+        #     }}
+        #     </style>
+        #     """
 
-        if file:
-            with open(file, "w") as f:
-                f.write(html)
-        return html
+        # if file:
+        #     with open(file, "w") as f:
+        #         f.write(html)
+        # return html
 
     @classmethod
     def merge(
@@ -209,6 +206,7 @@ def add_speckle(tl: TargetList, column_prefix="Speckle ", **kwargs) -> TargetLis
     speckle = speckle[speckle.index.isin(existing_targets)]
     new_column_names = {column: f"{column_prefix}{column.capitalize()}" for column in speckle.columns}
     speckle.rename(columns=new_column_names, inplace=True)
+    speckle[f"{column_prefix}Mid UTC"] = Time(speckle[f"{column_prefix}Mid"], format="jd").iso
     answer = TargetList.merge(tl, num_speckle, column_groups, {"Speckle": speckle})
     answer.target_list[count_column] = answer.target_list[count_column].fillna(int(0))
     return answer
