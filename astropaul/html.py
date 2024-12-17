@@ -74,7 +74,7 @@ def render_observing_pages(tl: tlc.TargetList, pl: pr.PriorityList, other_files:
                 tags.td(pl.session.site_info),
             )
             tags.tr(
-                tags.td("Total Time"),
+                tags.td("Available Time"),
                 tags.td(f"{pl.session.total_time.to(u.hour).value:.1f} hours"),
             )
             time_range = pl.session.time_range
@@ -181,9 +181,10 @@ def render_observing_pages(tl: tlc.TargetList, pl: pr.PriorityList, other_files:
 
     # make pages for numerical priorities
     if pl.numerical_priorities:
-        for priority_table in pl.numerical_priorities:
+        start_times = [f"{pt.index[0]:%Y-%m-%d}" for pt in pl.numerical_priorities]
+        for i, priority_table in enumerate(pl.numerical_priorities):
             pt = priority_table.copy()
-            start_utc = f"{pt.index[0]:%Y-%m-%d}"
+            start_utc = start_times[i]
             pt.index = [f"{time:%H:%M}" for time in pt.index]
             threshold = pl.category_bins[-2]
             for col in pt.columns:
@@ -197,14 +198,19 @@ def render_observing_pages(tl: tlc.TargetList, pl: pr.PriorityList, other_files:
             with dominate.document(title=title) as d:
                 d += tags.h1(title, style="text-align: center")
                 d += util.raw(dataframe_to_datatable(pt, "Numerical_Priority", table_options={"sort": False}))
+                if i > 0:
+                    d += tags.a("<-Prev", href=f"Numerical Priorities {start_times[i - 1]}.html")
+                if i < len(start_times) - 1:
+                    d += tags.a("Next->", href=f"Numerical Priorities {start_times[i + 1]}.html")
                 with open(f"{dir}/Numerical Priorities {start_utc}.html", "w") as f:
                     f.write(d.render())
 
     # make pages for categorical priorities
     if pl.categorical_priorities:
-        for categories_table in pl.categorical_priorities:
+        start_times = [f"{pt.index[0]:%Y-%m-%d}" for pt in pl.categorical_priorities]
+        for i, categories_table in enumerate(pl.categorical_priorities):
             ct = categories_table.copy()  # make a copy we can alter for formatting purposes
-            start_utc = f"{ct.index[0]:%Y-%m-%d}"
+            start_utc = start_times[i]
             ct.index = [f"{time:%H:%M}" for time in ct.index]
             highlight_value = "* * *"
             for col in ct.columns:
@@ -233,6 +239,10 @@ def render_observing_pages(tl: tlc.TargetList, pl: pr.PriorityList, other_files:
             with dominate.document(title=title) as d:
                 d += tags.h1(title, style="text-align: center")
                 d += util.raw(dataframe_to_datatable(ct, "Categorical_Priority", table_options={"sort": False}))
+                if i > 0:
+                    d += tags.a("<-Prev", href=f"Categorical Priorities {start_times[i - 1]}.html")
+                if i < len(start_times) - 1:
+                    d += tags.a("Next->", href=f"Categorical Priorities {start_times[i + 1]}.html")
                 with open(f"{dir}/Categorical Priorities {start_utc}.html", "w") as f:
                     f.write(d.render())
 
