@@ -29,6 +29,7 @@ class ObservingSession:
         else:
             answer += "No observing segments defined\n"
         return answer
+
     @property
     def site_info(self) -> str:
         if self.observer.name:
@@ -52,6 +53,13 @@ class ObservingSession:
             min(self.observing_segments, key=operator.itemgetter(0))[0],
             max(self.observing_segments, key=operator.itemgetter(1))[1],
         )
+
+    @property
+    def starting_lst(self) -> float:
+        if not self.observing_segments:
+            return 0
+        else:
+            return self.observer.local_sidereal_time(self.observing_segments[0][0]).to(u.deg).value
 
     def _determine_nighttime(self, night: Time) -> tuple[Time, Time]:
         beg_night = self.observer.sun_set_time(night, which="nearest")
