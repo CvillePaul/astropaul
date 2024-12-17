@@ -1,7 +1,8 @@
 import collections
 from datetime import datetime
-import os
+import pathlib
 import platform
+import shutil
 
 import astropy.units as u
 import dominate
@@ -15,11 +16,7 @@ import astropaul.targetlistcreator as tlc
 
 
 def dataframe_to_datatable(
-    table: pd.DataFrame, 
-    table_name: str = "table", 
-    caption: str = "", 
-    table_options: dict = None, 
-    buttons: list = None
+    table: pd.DataFrame, table_name: str = "table", caption: str = "", table_options: dict = None, buttons: list = None
 ):
     default_options = {
         "connected": True,
@@ -57,10 +54,12 @@ def dataframe_to_datatable(
 
 def render_observing_pages(tl: tlc.TargetList, pl: pr.PriorityList, other_files: dict[str, str], dir: str = "html") -> str:
     # wipe out contents of dir
-    # for file in os.listdir(dir):
-    #     file_path = os.path.join(dir, file)
-    #     os.unlink(file_path)
-
+    try:
+        shutil.rmtree(dir)
+    except FileNotFoundError:
+        pass  # don't care if directory didn't already exist
+    pathlib.Path(f"{dir}/targets").mkdir(parents=True)
+    pathlib.Path(f"{dir}/target scores").mkdir(parents=True)
     # make overall summary page that links to all the other pages
     with dominate.document(title="Observing Files") as d:
         border = 1
@@ -113,7 +112,7 @@ def render_observing_pages(tl: tlc.TargetList, pl: pr.PriorityList, other_files:
                 d += tags.span(f"{file_type}: ", tags.a("Contents", href=f"{file_type}.html"))
                 d += tags.br()
             d += tags.br()
-                
+
         # output information about target priorities
         d += tags.h2(f"Priorities ({pl.interval} interval)")
         t = tags.table(border=border, cellpadding=padding)
@@ -191,7 +190,9 @@ def render_observing_pages(tl: tlc.TargetList, pl: pr.PriorityList, other_files:
                 pt[col] = [
                     val if val < threshold else f'<span style="background-color: #EBF4FA">{val:.3f}</span>' for val in pt[col]
                 ]
-            pt.columns = [f'<a href="target scores/Target Scores {target} {start_utc}.html">{target}</a>' for target in pt.columns]
+            pt.columns = [
+                f'<a href="target scores/Target Scores {target} {start_utc}.html">{target}</a>' for target in pt.columns
+            ]
             title = f"{start_utc} Numerical Priorities"
             with dominate.document(title=title) as d:
                 d += tags.h1(title, style="text-align: center")
@@ -220,7 +221,9 @@ def render_observing_pages(tl: tlc.TargetList, pl: pr.PriorityList, other_files:
             ct.loc["Teff"] = [
                 f"{segment_targets[segment_targets["Target Name"] == col]["Teff"].values[0]:.0f}" for col in ct.columns
             ]
-            ct.loc["RV Standard"] = [segment_targets[segment_targets["Target Name"] == col]["RV Standard"].values[0] for col in ct.columns]
+            ct.loc["RV Standard"] = [
+                segment_targets[segment_targets["Target Name"] == col]["RV Standard"].values[0] for col in ct.columns
+            ]
             new_ordering = [*ct.index[-4:], *ct.index[:-4]]
             ct = ct.reindex(new_ordering)
             # elide the target names to first 4 digits
@@ -254,6 +257,7 @@ def render_observing_pages(tl: tlc.TargetList, pl: pr.PriorityList, other_files:
             for other_table in other_tables:
                 d += tags.h2(f"{other_table} Entries")
                 ot = tl.other_lists[other_table]
+                ot = ot.sort_values(["Target Name"] + ot.columns[0:3].to_list())
                 if ot.index.name == "Target Name":
                     if target_name in ot.index:
                         entries = ot.loc[[target_name]].reset_index(drop=True)
