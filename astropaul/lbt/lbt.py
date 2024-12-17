@@ -24,11 +24,11 @@ def add_pepsi_params(
     answer.target_list[f"{column_prefix}cd_red_num_exp"] = 1
     answer.target_list[f"{column_prefix}snr"] = snr
     answer.target_list[f"{column_prefix}exp_time"] = [
-        max(
+        round(max(
             (times := pepsi_exptime(vmag, snr, teff=teff, fiber_setup=fiber, binocular=binocular))[cd_red - 1],
             times[cd_blue - 1],
             60,  # never recommend exposures under 1 minute
-        )
+        ))
         for vmag, teff in answer.target_list[["Vmag", "Teff"]].values
     ]
     answer.target_list[f"{column_prefix}priority"] = priority
@@ -92,6 +92,7 @@ def write_lbt_readme_file(file_base: str, targets: pd.DataFrame, session: obs.Ob
     # save target list as csv
     readme.to_csv(
         file_base + ".csv",
+        index=False,
     )
     # make the readme file by prepending/appending the header/footer info
     readme_header = open(file_base + ".README.header", "r").readlines()
