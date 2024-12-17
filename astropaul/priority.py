@@ -235,7 +235,7 @@ def aggregate_target_priorities(pl: PriorityList, skip_column_threshold: float =
         target_names = segment_target_list["Target Name"].tolist()
         # calculate LST at beginning of this observing segment
         lst = pl.session.observer.local_sidereal_time(sub_segments[0][0]).to(u.deg).value
-        first_ra_of_night = lst - 60  # lst is the RA at 90 deg alt, we want targets at 30 deg alt
+        first_ra_of_night = (lst - 60) % 360  # lst is the RA at 90 deg alt, we want targets at 30 deg alt
         # now "pivot" the table so the first column is the RA
         i = 0
         for _, target in segment_target_list.iterrows():
