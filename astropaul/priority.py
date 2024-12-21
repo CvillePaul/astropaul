@@ -102,7 +102,6 @@ def calculate_altitude_priority(
                 segment_table["Altitude Priority"] = 0
 
 
-
 def calculate_list_priority(pl: PriorityList, list_name: str, invert: bool = False, false_value: float = 0.2) -> None:
     for _, row in pl.target_list.target_list.iterrows():
         target = row["Target Name"]
@@ -211,10 +210,9 @@ def calculate_eclipse_priority(
                 segment_table.loc[beg_index:end_index, f"System {system} Eclipse"] = f"{system}{member}"
                 segment_table.loc[beg_index:end_index, f"System {system} Problems"] = ", ".join(problems)
             # finally, determine priority based on absence of problems
-            mask = (
-                (segment_table[eclipse_columns].ne("").any(axis=1)) # require one or more eclipses for this sub-segment
-                & (segment_table[problem_columns].eq("").all(axis=1)) # require no problems for any eclipse in this sub-segment
-            )
+            mask = (segment_table[eclipse_columns].ne("").any(axis=1)) & (  # require one or more eclipses for this sub-segment
+                segment_table[problem_columns].eq("").all(axis=1)
+            )  # require no problems for any eclipse in this sub-segment
             segment_table.loc[mask, "Eclipse Priority"] = 1.0
 
 
