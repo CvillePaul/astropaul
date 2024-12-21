@@ -190,7 +190,10 @@ def calculate_eclipse_priority(
                 system_1, _, beg_1, end_1 = target_eclipses[i]
                 for j in range(i + 1, len(target_eclipses)):
                     system_2, _, beg_2, end_2 = target_eclipses[j]
-                    if beg_1 <= beg_2 <= end_1 or beg_1 <= end_2 <= end_1:
+                    if (
+                        beg_1 <= beg_2 <= end_1 or beg_1 <= end_2 <= end_1 or
+                        beg_2 <= beg_1 <= end_2 or beg_2 <= end_1 <= end_2
+                    ):
                         eclipse_problems[i].append(f"{system_2} Overlap")
                         eclipse_problems[j].append(f"{system_1} Overlap")
             # check if altitude ok during all of each eclipse
