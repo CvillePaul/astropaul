@@ -63,7 +63,7 @@ def render_observing_pages(tl: tlc.TargetList, pl: pr.PriorityList, other_files:
 
     horizontal_space = tags.span(style="display: inline-block; width: 20px;")
     # make overall summary page that links to all the other pages
-    with dominate.document(title="Observing Files") as d:
+    with dominate.document(title=tl.name) as d:
         border = 1
         padding = 10
         d += tags.h1(tl.name)
@@ -77,14 +77,9 @@ def render_observing_pages(tl: tlc.TargetList, pl: pr.PriorityList, other_files:
             )
             tags.tr(
                 tags.td("Available Time"),
-                tags.td(f"{pl.session.total_time.to(u.hour).value:.1f} hours"),
+                tags.td(f"{pl.session.total_time.to(u.hour).value:.1f} hours in {len(pl.segments)} observing segments"),
             )
             time_range = pl.session.time_range
-            tags.tr(
-                tags.td("Observing Segments"),
-                tags.td(len(pl.segments)),
-                # tags.td(util.raw(f"{len(pl.segments)} total<br>{time_range[0].iso[:19]} start<br>{time_range[1].iso[:19]} end")),
-            )
             tags.tr(
                 tags.td("UTC Range"),
                 tags.td(f"{time_range[0].iso[:19]} through {time_range[1].iso[:19]}"),
@@ -92,7 +87,7 @@ def render_observing_pages(tl: tlc.TargetList, pl: pr.PriorityList, other_files:
         d += t
         d += tags.br()
         # output information about the targets
-        d += tags.h2(f"Target List ({len(tl.target_list)} targets)", tags.a("Link to table", href=f"{tl.name}.html"))
+        d += tags.h2(f"Target List ({len(tl.target_list)} targets)", tags.a("View target table", href=f"{tl.name}.html"))
         target_types = collections.Counter(tl.target_list["Target Type"])
         t = tags.table(border=border, cellpadding=padding)
         with t:
