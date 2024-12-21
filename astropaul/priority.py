@@ -84,16 +84,23 @@ def calculate_moon_priority(
             segment_table["Moon Priority"] = priorities
 
 
-def calculate_altitude_priority(pl: PriorityList, altitude_categories: CategoryTable) -> None:
+def calculate_altitude_priority(
+    pl: PriorityList, altitude_categories: CategoryTable, min_nonzero_time: u.Quantity = 0 * u.hour
+) -> None:
     for _, row in pl.target_list.target_list.iterrows():
         target = row["Target Name"]
         coord = SkyCoord(ra=row["ra"], dec=row["dec"], unit=u.deg)
         for segment_table in pl.target_tables[target]:
             times = Time(segment_table.index)
             altitudes = pl.session.observer.altaz(times, coord).alt.value
-            priorities = [pick_category(altitude_categories, altitude) for altitude in altitudes]
             segment_table["Altitude Value"] = altitudes
-            segment_table["Altitude Priority"] = priorities
+            priorities = [pick_category(altitude_categories, altitude) for altitude in altitudes]
+            num_nonzero = len(list(filter(lambda x: x > 0, priorities)))
+            if pl.interval * num_nonzero > min_nonzero_time:
+                segment_table["Altitude Priority"] = priorities
+            else:
+                segment_table["Altitude Priority"] = 0
+
 
 
 def calculate_list_priority(pl: PriorityList, list_name: str, invert: bool = False, false_value: float = 0.2) -> None:
@@ -190,10 +197,7 @@ def calculate_eclipse_priority(
                 system_1, _, beg_1, end_1 = target_eclipses[i]
                 for j in range(i + 1, len(target_eclipses)):
                     system_2, _, beg_2, end_2 = target_eclipses[j]
-                    if (
-                        beg_1 <= beg_2 <= end_1 or beg_1 <= end_2 <= end_1 or
-                        beg_2 <= beg_1 <= end_2 or beg_2 <= end_1 <= end_2
-                    ):
+                    if beg_1 <= beg_2 <= end_1 or beg_1 <= end_2 <= end_1 or beg_2 <= beg_1 <= end_2 or beg_2 <= end_1 <= end_2:
                         eclipse_problems[i].append(f"{system_2} Overlap")
                         eclipse_problems[j].append(f"{system_1} Overlap")
             # check if altitude ok during all of each eclipse
@@ -207,8 +211,9 @@ def calculate_eclipse_priority(
                 segment_table.loc[beg_index:end_index, f"System {system} Eclipse"] = f"{system}{member}"
                 segment_table.loc[beg_index:end_index, f"System {system} Problems"] = ", ".join(problems)
             # finally, determine priority based on absence of problems
-            mask = (segment_table[eclipse_columns].ne("").sum(axis=1) == 1) & (
-                segment_table[problem_columns].eq("").all(axis=1)
+            mask = (
+                (segment_table[eclipse_columns].ne("").any(axis=1)) # require one or more eclipses for this sub-segment
+                & (segment_table[problem_columns].eq("").all(axis=1)) # require no problems for any eclipse in this sub-segment
             )
             segment_table.loc[mask, "Eclipse Priority"] = 1.0
 
