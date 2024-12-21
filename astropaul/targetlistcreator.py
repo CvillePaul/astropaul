@@ -226,7 +226,17 @@ def add_pepsi(tl: TargetList, column_prefix="PEPSI ", **kwargs) -> TargetList:
     )
     column_groups = {"Count": ([count_column], [])}
     # next, add a separate table of all spectra
-    spectra = pd.read_sql("select * from tom_spectrumrawdata", kwargs["connection"], index_col="target_id")
+    spectra = pd.read_sql(
+        """
+        select t.name 'Target Name', srd.*
+        from tom_spectrumrawdata as srd
+        join tom_target as t on t.id = srd.target_id
+        """,
+        kwargs["connection"], 
+        index_col="Target Name",
+        )
+    existing_targets = tl.target_list["Target Name"].to_list()
+    spectra = spectra[spectra.index.isin(existing_targets)]
     new_column_names = {column: f"{column_prefix}{column.capitalize()}" for column in spectra.columns}
     spectra.rename(columns=new_column_names, inplace=True)
     answer = TargetList.merge(tl, spectra_count, column_groups, {"PEPSI": spectra})
