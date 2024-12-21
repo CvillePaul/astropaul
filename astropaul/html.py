@@ -168,14 +168,25 @@ def render_observing_pages(tl: tlc.TargetList, pl: pr.PriorityList, other_files:
 
     # make a page for each target's priority scores
     for target, target_table_list in pl.target_tables.items():
-        for target_table in target_table_list:
+        start_times = [f"{tt.index[0]:%Y-%m-%d}" for tt in target_table_list]
+        for i, target_table in enumerate(target_table_list):
             tt = target_table.copy()
             start_utc = f"{tt.index[0]:%Y-%m-%d}"
             tt.index = [f"{time:%H:%M}" for time in tt.index]
             title = f"{start_utc} Target Scores for {target}"
             with dominate.document(title=title) as d:
-                d += tags.h1("Target Scores for", tags.a(target, href=f"../targets/{target}.html"), style="text-align: center")
+                d += tags.h1(
+                    tags.a(target, href=f"../targets/{target}.html"), 
+                    tags.span(style="display: inline-block; width: 10px;"),
+                    f"Target Scores for {start_utc} UTC",
+                    style="text-align: center")
                 d += tags.p(util.raw(dataframe_to_datatable(tt, "Target_Scores", table_options={"sort": False})))
+                if i > 0:
+                    d.footer += tags.a("<-Prev", href=f"Target Scores {target} {start_times[i - 1]}.html")
+                    d.footer += tags.span(style="display: inline-block; width: 20px;")
+                if i < len(start_times) - 1:
+                    d.footer += tags.a("Next->", href=f"Target Scores {target} {start_times[i + 1]}.html")
+                    d.footer += tags.span(style="display: inline-block; width: 20px;")
                 with open(f"{dir}/target scores/Target Scores {target} {start_utc}.html", "w") as f:
                     f.write(d.render())
 
@@ -189,19 +200,27 @@ def render_observing_pages(tl: tlc.TargetList, pl: pr.PriorityList, other_files:
             threshold = pl.category_bins[-2]
             for col in pt.columns:
                 pt[col] = [
-                    val if val < threshold else f'<span style="background-color: #EBF4FA">{val:.3f}</span>' for val in pt[col]
+                    (
+                        0
+                        if val == 0
+                        else f"{val:.3f}" if val < threshold else f'<span style="background-color: #EBF4FA">{val:.3f}</span>'
+                    )
+                    for val in pt[col]
                 ]
             pt.columns = [
                 f'<a href="target scores/Target Scores {target} {start_utc}.html">{target}</a>' for target in pt.columns
             ]
-            title = f"{start_utc} Numerical Priorities"
+            title = f"Numerical Priorities, {start_utc} UTC"
             with dominate.document(title=title) as d:
                 d += tags.h1(title, style="text-align: center")
                 d += util.raw(dataframe_to_datatable(pt, "Numerical_Priority", table_options={"sort": False}))
                 if i > 0:
-                    d += tags.a("<-Prev", href=f"Numerical Priorities {start_times[i - 1]}.html")
+                    d.footer += tags.a("<-Prev", href=f"Numerical Priorities {start_times[i - 1]}.html")
+                    d.footer += tags.span(style="display: inline-block; width: 20px;")
                 if i < len(start_times) - 1:
-                    d += tags.a("Next->", href=f"Numerical Priorities {start_times[i + 1]}.html")
+                    d.footer += tags.a("Next->", href=f"Numerical Priorities {start_times[i + 1]}.html")
+                    d.footer += tags.span(style="display: inline-block; width: 20px;")
+                d.footer += tags.a("Categorical Priorities", href=f"Categorical Priorities {start_utc}.html")
                 with open(f"{dir}/Numerical Priorities {start_utc}.html", "w") as f:
                     f.write(d.render())
 
@@ -210,6 +229,8 @@ def render_observing_pages(tl: tlc.TargetList, pl: pr.PriorityList, other_files:
         start_times = [f"{pt.index[0]:%Y-%m-%d}" for pt in pl.categorical_priorities]
         for i, categories_table in enumerate(pl.categorical_priorities):
             ct = categories_table.copy()  # make a copy we can alter for formatting purposes
+            if len(ct.columns) == 0:
+                continue # skip cases where there were no targets passing criteria
             start_utc = start_times[i]
             ct.index = [f"{time:%H:%M}" for time in ct.index]
             highlight_value = "* * *"
@@ -224,25 +245,33 @@ def render_observing_pages(tl: tlc.TargetList, pl: pr.PriorityList, other_files:
             # add some helpful informational rows to the top of the chart
             ct.loc["RA"] = [segment_targets[segment_targets["Target Name"] == col]["RA"].values[0][:8] for col in ct.columns]
             ct.loc["Dec"] = [segment_targets[segment_targets["Target Name"] == col]["Dec"].values[0][:9] for col in ct.columns]
-            ct.loc["Teff"] = [
-                f"{segment_targets[segment_targets["Target Name"] == col]["Teff"].values[0]:.0f}" for col in ct.columns
-            ]
-            ct.loc["RV Standard"] = [
-                segment_targets[segment_targets["Target Name"] == col]["RV Standard"].values[0] for col in ct.columns
-            ]
-            new_ordering = [*ct.index[-4:], *ct.index[:-4]]
+            num_added_rows = 2
+            if "PEPSI exp_time" in segment_targets.columns:
+                ct.loc["Teff"] = [
+                    f"{segment_targets[segment_targets["Target Name"] == col]["Teff"].values[0]:.0f}" for col in ct.columns
+                ]
+                num_added_rows += 1
+            if "RV Standard" in segment_targets.columns:
+                ct.loc["RV Standard"] = [
+                    segment_targets[segment_targets["Target Name"] == col]["RV Standard"].values[0] for col in ct.columns
+                ]
+                num_added_rows += 1
+            new_ordering = [*ct.index[-num_added_rows:], *ct.index[:-num_added_rows]]
             ct = ct.reindex(new_ordering)
             # elide the target names to first 4 digits
             ct.columns = [col[:8] + "..." for col in ct.columns]
             # generate the chart
-            title = f"{start_utc} Categorical Priorities"
+            title = f"Categorical Priorities, {start_utc} UTC"
             with dominate.document(title=title) as d:
                 d += tags.h1(title, style="text-align: center")
                 d += util.raw(dataframe_to_datatable(ct, "Categorical_Priority", table_options={"sort": False}))
                 if i > 0:
-                    d += tags.a("<-Prev", href=f"Categorical Priorities {start_times[i - 1]}.html")
+                    d.footer += tags.a("<-Prev", href=f"Categorical Priorities {start_times[i - 1]}.html")
+                    d.footer += tags.span(style="display: inline-block; width: 20px;")
                 if i < len(start_times) - 1:
-                    d += tags.a("Next->", href=f"Categorical Priorities {start_times[i + 1]}.html")
+                    d.footer += tags.a("Next->", href=f"Categorical Priorities {start_times[i + 1]}.html")
+                    d.footer += tags.span(style="display: inline-block; width: 20px;")
+                d.footer += tags.a("Numerical Priorities", href=f"Numerical Priorities {start_utc}.html")
                 with open(f"{dir}/Categorical Priorities {start_utc}.html", "w") as f:
                     f.write(d.render())
 
@@ -277,5 +306,9 @@ def render_observing_pages(tl: tlc.TargetList, pl: pr.PriorityList, other_files:
                     entries = ot[ot["Target Name"] == target_name].drop("Target Name", axis=1)
                 if not entries.empty:
                     d += util.raw(entries.style.hide(axis="index").set_table_styles(table_styles).to_html())
+            d.footer += tags.p(
+                f"Created {datetime.now().astimezone().isoformat(sep=" ", timespec="seconds")} on {platform.node()}",
+                style="text-align: left; font-style: italic;",
+                )
             with open(f"{dir}/targets/{target_name}.html", "w") as f:
                 f.write(d.render())
