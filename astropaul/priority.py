@@ -127,57 +127,87 @@ def calculate_eclipse_priority(
     if pl.target_tables:
         if not altitude_column in next(iter(pl.target_tables.values()))[0].columns:
             raise ValueError(f"Required column {altitude_column} not in existing target tables")
+    else:
+        raise ValueError("No target tables are present in PriorityList")
+
     eclipse_pattern = [out_eclipse_name, in_eclipse_name, out_eclipse_name]
-    for _, row in pl.target_list.target_list.iterrows():
-        target_name = row["Target Name"]
-        # figure out all the full eclipses that happen for this target
+    for target_name, segment_tables in pl.target_tables.items():
         target_events = phase_events[phase_events["Target Name"] == target_name]
-        target_eclipses = []
-        for (system, member), group in target_events.groupby(["System", "Member"]):
-            if group.empty or len(group) < len(eclipse_pattern):
-                continue
-            times = []
-            for _, event in group.sort_values("Event JD").iterrows():
-                if event["Event"] == eclipse_pattern[len(times)]:
-                    times.append(event["Event JD"])
-                    if len(times) == len(eclipse_pattern):
-                        break
-                    continue
-            if len(times) == len(eclipse_pattern):
-                beg = Time(times[1], format="jd").to_datetime()
-                end = Time(times[2], format="jd").to_datetime()
-                target_eclipses.append((system, member, beg, end))
-        # if two eclipses overlap or one surrounds the other, remove both
-        for i in range(len(target_eclipses)):
-            system_1, _, beg_1, end_1 = target_eclipses[i]
-            if system_1 == "":
-                continue
-            for j in range(i + 1, len(target_eclipses)):
-                system_2, _, beg_2, end_2 = target_eclipses[j]
-                if system_2 == "":
-                    continue
-                if beg_1 <= beg_2 <= end_1 or beg_1 <= end_2 <= end_1:
-                    target_eclipses[i] = ("", "", beg_1, end_1)
-                    target_eclipses[j] = ("", "", beg_2, end_2)
-        target_eclipses = [x for x in target_eclipses if x[0] != ""]
-        # add columns to the segment table indicating the member in eclipse for each system
-        system_columns = {system: f"Full {system} Eclipse" for system, _ in target_events.groupby("System")}
-        if len(system_columns) == 0:
-            continue  # skip if none of the systems ever have an eclipse
-        for segment_table in pl.target_tables[target_name]:
-            for col_name in system_columns.values():
-                segment_table[col_name] = ""
-            segment_beg = segment_table.index[0]
-            segment_end = segment_table.index[-1]
-            for system, member, beg, end in target_eclipses:
-                if segment_beg <= beg and end <= segment_end:
-                    beg_index = segment_table.index[segment_table.index <= beg].max()
-                    end_index = segment_table.index[segment_table.index >= end].min()
-                    if segment_table.loc[beg_index:end_index, altitude_column].min() >= min_altitude.value:
-                        segment_table.loc[beg_index:end_index, system_columns[system]] = f"{system}{member}"
-            # set the eclipse priority based on the eclipse status of each system's column
+        target_systems = [system for system, _ in target_events.groupby("System")]
+        eclipse_columns = [f"System {system} Eclipse" for system in target_systems]
+        problem_columns = [f"System {system} Problems" for system in target_systems]
+        for segment_table in segment_tables:
+            segment_beg = Time(segment_table.index[0]).jd
+            segment_end = Time(segment_table.index[-1]).jd
+            # add columns for each system of this target
+            for eclipse_column, problem_column in zip(eclipse_columns, problem_columns):
+                segment_table[eclipse_column] = ""
+                segment_table[problem_column] = ""
+            # figure out all the eclipses that happen for this target during this segment
+            target_eclipses = []  # list of (beg, end) jd values of eclipses.  nan for beg or end indicates partial eclipse
+            for (system, member), group in target_events.groupby(["System", "Member"]):
+                if group.empty or len(group) < len(eclipse_pattern):
+                    continue  # skip this target if it doesn't have enough events to fulfill the full eclipse pattern
+                mask = (group["Event JD"] >= segment_beg) & (group["Event JD"] <= segment_end)
+                segment_events = group[mask].sort_values("Event JD")
+                eclipse_beg = float("nan")
+                eclipse_under_construction = False
+                for _, event_name, event_jd, phase in segment_events[["Event", "Event JD", "Phase"]].itertuples():
+                    if event_name == in_eclipse_name:
+                        eclipse_under_construction = True
+                        if phase == phase:
+                            eclipse_beg = event_jd  # eclipse started during this segment
+                        else:
+                            eclipse_beg = float("nan")  # eclipse already in progress when segment began
+                    elif event_name == out_eclipse_name and eclipse_under_construction:
+                        target_eclipses.append((system, member, eclipse_beg, event_jd))
+                        eclipse_under_construction = False
+                if eclipse_under_construction:
+                    target_eclipses.append(
+                        (system, member, eclipse_beg, float("nan"))
+                    )  # eclipse didn't finish before segment end
             segment_table["Eclipse Priority"] = no_eclipse_score
-            segment_table.loc[segment_table[system_columns.values()].sum(axis=1).str.len() == 2, "Eclipse Priority"] = 1.0
+            if len(target_eclipses) == 0:
+                continue
+            # for each eclipse, calc the segment index on which the beg & end occur
+            eclipse_ranges = []
+            for _, _, beg, end in target_eclipses:
+                beg_dt = Time(beg, format="jd").to_datetime() if beg == beg else Time(segment_beg, format="jd").to_datetime()
+                end_dt = Time(end, format="jd").to_datetime() if end == end else Time(segment_end, format="jd").to_datetime()
+                beg_index = segment_table.index[segment_table.index <= beg_dt].max()
+                end_index = segment_table.index[segment_table.index >= end_dt].min()
+                eclipse_ranges.append((beg_index, end_index))
+            # check if there are problems with any eclipses
+            eclipse_problems = {index: [] for index in range(len(target_eclipses))}
+            # flag all partial eclipses
+            for i, (_, _, beg, end) in enumerate(target_eclipses):
+                if beg != beg:
+                    eclipse_problems[i].append("No ingress")
+                elif end != end:
+                    eclipse_problems[i].append("No egress")
+            # check if two eclipses overlap or one surrounds the other
+            for i in range(len(target_eclipses)):
+                system_1, _, beg_1, end_1 = target_eclipses[i]
+                for j in range(i + 1, len(target_eclipses)):
+                    system_2, _, beg_2, end_2 = target_eclipses[j]
+                    if beg_1 <= beg_2 <= end_1 or beg_1 <= end_2 <= end_1:
+                        eclipse_problems[i].append(f"{system_2} Overlap")
+                        eclipse_problems[j].append(f"{system_1} Overlap")
+            # check if altitude ok during all of each eclipse
+            for i, (beg_index, end_index) in enumerate(eclipse_ranges):
+                if segment_table.loc[beg_index:end_index, altitude_column].min() < min_altitude.value:
+                    eclipse_problems[i].append("Low")
+            # mark appropriate rows for each eclipse
+            for (system, member, _, _), (problems), (beg_index, end_index) in zip(
+                target_eclipses, eclipse_problems.values(), eclipse_ranges
+            ):
+                segment_table.loc[beg_index:end_index, f"System {system} Eclipse"] = f"{system}{member}"
+                segment_table.loc[beg_index:end_index, f"System {system} Problems"] = ", ".join(problems)
+            # finally, determine priority based on absence of problems
+            mask = (segment_table[eclipse_columns].ne("").sum(axis=1) == 1) & (
+                segment_table[problem_columns].eq("").all(axis=1)
+            )
+            segment_table.loc[mask, "Eclipse Priority"] = 1.0
 
 
 def calculate_phase_priority(pl: PriorityList, phase_defs: list[ph.PhaseEventDef], phase_categories: dict[str, float]) -> None:
@@ -231,6 +261,8 @@ def aggregate_target_priorities(pl: PriorityList, skip_column_threshold: float =
     target_list = pl.target_list.target_list
     # each observing segment might have a different list of targets, so sorting by RA needs to happen per observing segment
     for sub_segments, aggregate_table in zip(pl.segments, aggregate_tables):
+        if len(aggregate_table.columns) == 0:
+            continue  # don't add tables with no columns
         segment_target_list = target_list[target_list["Target Name"].isin(aggregate_table.columns)].sort_values("ra")
         target_names = segment_target_list["Target Name"].tolist()
         # calculate LST at beginning of this observing segment
