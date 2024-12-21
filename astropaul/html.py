@@ -60,6 +60,8 @@ def render_observing_pages(tl: tlc.TargetList, pl: pr.PriorityList, other_files:
         pass  # don't care if directory didn't already exist
     pathlib.Path(f"{dir}/targets").mkdir(parents=True)
     pathlib.Path(f"{dir}/target scores").mkdir(parents=True)
+
+    horizontal_space = tags.span(style="display: inline-block; width: 20px;")
     # make overall summary page that links to all the other pages
     with dominate.document(title="Observing Files") as d:
         border = 1
@@ -182,11 +184,14 @@ def render_observing_pages(tl: tlc.TargetList, pl: pr.PriorityList, other_files:
                     style="text-align: center")
                 d += tags.p(util.raw(dataframe_to_datatable(tt, "Target_Scores", table_options={"sort": False})))
                 if i > 0:
-                    d.footer += tags.a("<-Prev", href=f"Target Scores {target} {start_times[i - 1]}.html")
-                    d.footer += tags.span(style="display: inline-block; width: 20px;")
+                    d.head += tags.a("<-Prev", href=f"Target Scores {target} {start_times[i - 1]}.html")
+                else:
+                    d.head += tags.span("<-Prev")
+                d.head += horizontal_space
                 if i < len(start_times) - 1:
-                    d.footer += tags.a("Next->", href=f"Target Scores {target} {start_times[i + 1]}.html")
-                    d.footer += tags.span(style="display: inline-block; width: 20px;")
+                    d.head += tags.a("Next->", href=f"Target Scores {target} {start_times[i + 1]}.html")
+                else:
+                    d.head += tags.span("Next->")
                 with open(f"{dir}/target scores/Target Scores {target} {start_utc}.html", "w") as f:
                     f.write(d.render())
 
@@ -215,12 +220,16 @@ def render_observing_pages(tl: tlc.TargetList, pl: pr.PriorityList, other_files:
                 d += tags.h1(title, style="text-align: center")
                 d += util.raw(dataframe_to_datatable(pt, "Numerical_Priority", table_options={"sort": False}))
                 if i > 0:
-                    d.footer += tags.a("<-Prev", href=f"Numerical Priorities {start_times[i - 1]}.html")
-                    d.footer += tags.span(style="display: inline-block; width: 20px;")
+                    d.head += tags.a("<-Prev", href=f"Numerical Priorities {start_times[i - 1]}.html")
+                else:
+                    d.head += tags.span("<-Prev")
+                d.head += horizontal_space
                 if i < len(start_times) - 1:
-                    d.footer += tags.a("Next->", href=f"Numerical Priorities {start_times[i + 1]}.html")
-                    d.footer += tags.span(style="display: inline-block; width: 20px;")
-                d.footer += tags.a("Categorical Priorities", href=f"Categorical Priorities {start_utc}.html")
+                    d.head += tags.a("Next->", href=f"Numerical Priorities {start_times[i + 1]}.html")
+                else:
+                    d.head += tags.span("Next->")
+                d.head += horizontal_space
+                d.head += tags.a("Categorical Priorities", href=f"Categorical Priorities {start_utc}.html")
                 with open(f"{dir}/Numerical Priorities {start_utc}.html", "w") as f:
                     f.write(d.render())
 
@@ -233,7 +242,7 @@ def render_observing_pages(tl: tlc.TargetList, pl: pr.PriorityList, other_files:
                 continue # skip cases where there were no targets passing criteria
             start_utc = start_times[i]
             ct.index = [f"{time:%H:%M}" for time in ct.index]
-            highlight_value = "* * *"
+            highlight_value = pl.category_labels[-1]
             for col in ct.columns:
                 ct[col] = [
                     val if val != highlight_value else f'<span style="background-color: #EBF4FA">{val}</span>'
@@ -266,12 +275,16 @@ def render_observing_pages(tl: tlc.TargetList, pl: pr.PriorityList, other_files:
                 d += tags.h1(title, style="text-align: center")
                 d += util.raw(dataframe_to_datatable(ct, "Categorical_Priority", table_options={"sort": False}))
                 if i > 0:
-                    d.footer += tags.a("<-Prev", href=f"Categorical Priorities {start_times[i - 1]}.html")
-                    d.footer += tags.span(style="display: inline-block; width: 20px;")
+                    d.head += tags.a("<-Prev", href=f"Categorical Priorities {start_times[i - 1]}.html")
+                else:
+                    d.head += tags.span("<-Prev")
+                d.head += horizontal_space
                 if i < len(start_times) - 1:
-                    d.footer += tags.a("Next->", href=f"Categorical Priorities {start_times[i + 1]}.html")
-                    d.footer += tags.span(style="display: inline-block; width: 20px;")
-                d.footer += tags.a("Numerical Priorities", href=f"Numerical Priorities {start_utc}.html")
+                    d.head += tags.a("Next->", href=f"Categorical Priorities {start_times[i + 1]}.html")
+                else:
+                    d.head += tags.span("Next->")
+                d.head += horizontal_space
+                d.head += tags.a("Numerical Priorities", href=f"Numerical Priorities {start_utc}.html")
                 with open(f"{dir}/Categorical Priorities {start_utc}.html", "w") as f:
                     f.write(d.render())
 
