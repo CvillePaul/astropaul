@@ -3,6 +3,7 @@ from datetime import datetime
 import pathlib
 import platform
 import shutil
+import textwrap
 
 import astropy.units as u
 import dominate
@@ -35,7 +36,8 @@ def dataframe_to_datatable(
         caption = f"Created {datetime.now().astimezone().isoformat(sep=" ", timespec="seconds")} on {platform.node()}"
     table_name = table_name.replace(" ", "_")
     html = itables.to_html_datatable(df=table, caption=caption, table_id=table_name, **{**default_options, **table_options})
-    html += f"""
+    html += textwrap.dedent(
+        f"""
         <style>
         td {{text-align: center}}
         #{table_name} th {{
@@ -49,6 +51,7 @@ def dataframe_to_datatable(
         }}
         </style>
         """
+    )
     return html
 
 
@@ -62,6 +65,20 @@ def render_observing_pages(tl: tlc.TargetList, pl: pr.PriorityList, other_files:
     pathlib.Path(f"{dir}/target scores").mkdir(parents=True)
 
     horizontal_space = tags.span(style="display: inline-block; width: 20px;")
+    keybinding_script = textwrap.dedent(
+        """
+        document.addEventListener("keydown", function(event) {
+            if (event.key === "ArrowRight") { document.getElementById("nextDay").click(); }
+            if (event.key === "ArrowLeft")  { document.getElementById("prevDay").click(); }
+            if (event.key === "s")          { document.getElementById("summary").click(); }
+            if (event.key === "c")          { document.getElementById("categorical").click(); }
+            if (event.key === "n")          { document.getElementById("numerical").click(); }
+            if (event.key === "t")          { document.getElementById("targets").click(); }
+            if (event.key === "j")          { document.getElementById("nextTarget").click(); }
+            if (event.key === "k")          { document.getElementById("prevTarget").click(); }
+        });
+    """
+    )
     # make overall summary page that links to all the other pages
     with dominate.document(title=tl.name) as d:
         border = 1
@@ -87,7 +104,9 @@ def render_observing_pages(tl: tlc.TargetList, pl: pr.PriorityList, other_files:
         d += t
         d += tags.br()
         # output information about the targets
-        d += tags.h2(f"Target List ({len(tl.target_list)} targets)", tags.a("View target table", href=f"{tl.name}.html"))
+        d += tags.h2(
+            f"Target List ({len(tl.target_list)} targets)", tags.a("View target table", href=f"{tl.name}.html", id="targets")
+        )
         target_types = collections.Counter(tl.target_list["Target Type"])
         t = tags.table(border=border, cellpadding=padding)
         with t:
@@ -115,16 +134,25 @@ def render_observing_pages(tl: tlc.TargetList, pl: pr.PriorityList, other_files:
         t = tags.table(border=border, cellpadding=padding)
         with t:
             tags.tr(tags.th("Start UTC"), tags.th("Finish UTC"), tags.th(), tags.th())
+            first_iteration = True
             for subsegments in pl.segments:
                 beg = subsegments[0][0]
                 end = subsegments[-1][1]
+                if first_iteration:
+                    numerical_id = "numerical"
+                    categorical_id = "categorical"
+                    first_iteration = False
+                else:
+                    numerical_id = "numerical_other"
+                    categorical_id = "categorical_other"
                 tags.tr(
                     tags.td(beg.iso[:19]),
                     tags.td(end.iso[:19]),
-                    tags.td(tags.a("Numerical", href=f"Numerical Priorities {beg.iso[:10]}.html")),
-                    tags.td(tags.a("Categorical", href=f"Categorical Priorities {beg.iso[:10]}.html")),
+                    tags.td(tags.a("Numerical", href=f"Numerical Priorities {beg.iso[:10]}.html", id=numerical_id)),
+                    tags.td(tags.a("Categorical", href=f"Categorical Priorities {beg.iso[:10]}.html", id=categorical_id)),
                 )
         d += t
+        d += tags.script(util.raw(keybinding_script))
         with open(f"{dir}/index.html", "w") as f:
             f.write(d.render())
 
@@ -133,6 +161,7 @@ def render_observing_pages(tl: tlc.TargetList, pl: pr.PriorityList, other_files:
     tltl["Target Name"] = [f'<a href="targets/{target_name}.html">{target_name}</a>' for target_name in tltl["Target Name"]]
     title = tl.name
     with dominate.document(title=title) as d:
+        d.head += tags.a("Summary Page", href="index.html", id="summary")
         d += tags.h1(title, style="text-align: center")
         buttons = [
             {
@@ -160,35 +189,9 @@ def render_observing_pages(tl: tlc.TargetList, pl: pr.PriorityList, other_files:
                 },
             )
         )
+        d += tags.script(util.raw(keybinding_script))
         with open(f"{dir}/{title}.html", "w") as f:
             f.write(d.render())
-
-    # make a page for each target's priority scores
-    for target, target_table_list in pl.target_tables.items():
-        start_times = [f"{tt.index[0]:%Y-%m-%d}" for tt in target_table_list]
-        for i, target_table in enumerate(target_table_list):
-            tt = target_table.copy()
-            start_utc = f"{tt.index[0]:%Y-%m-%d}"
-            tt.index = [f"{time:%H:%M}" for time in tt.index]
-            title = f"{start_utc} Target Scores for {target}"
-            with dominate.document(title=title) as d:
-                d += tags.h1(
-                    tags.a(target, href=f"../targets/{target}.html"), 
-                    tags.span(style="display: inline-block; width: 10px;"),
-                    f"Target Scores for {start_utc} UTC",
-                    style="text-align: center")
-                d += tags.p(util.raw(dataframe_to_datatable(tt, "Target_Scores", table_options={"sort": False})))
-                if i > 0:
-                    d.head += tags.a("<-Prev", href=f"Target Scores {target} {start_times[i - 1]}.html")
-                else:
-                    d.head += tags.span("<-Prev")
-                d.head += horizontal_space
-                if i < len(start_times) - 1:
-                    d.head += tags.a("Next->", href=f"Target Scores {target} {start_times[i + 1]}.html")
-                else:
-                    d.head += tags.span("Next->")
-                with open(f"{dir}/target scores/Target Scores {target} {start_utc}.html", "w") as f:
-                    f.write(d.render())
 
     # make pages for numerical priorities
     if pl.numerical_priorities:
@@ -197,6 +200,7 @@ def render_observing_pages(tl: tlc.TargetList, pl: pr.PriorityList, other_files:
             pt = priority_table.copy()
             start_utc = start_times[i]
             pt.index = [f"{time:%H:%M}" for time in pt.index]
+            # apply background highlighting to cells above threshold
             threshold = pl.category_bins[-2]
             for col in pt.columns:
                 pt[col] = [
@@ -207,26 +211,83 @@ def render_observing_pages(tl: tlc.TargetList, pl: pr.PriorityList, other_files:
                     )
                     for val in pt[col]
                 ]
+            # turn column headings into links to target score pages
+            all_targets = pt.columns.to_list() # save list of target names, in column order, before changing them into links
             pt.columns = [
-                f'<a href="target scores/Target Scores {target} {start_utc}.html">{target}</a>' for target in pt.columns
+                (
+                    f'<a href="target scores/Target Scores {target} {start_utc}.html", id="targets">{target}</a>'
+                    if target == pt.columns[0]
+                    else f'<a href="target scores/Target Scores {target} {start_utc}.html">{target}</a>'
+                )
+                for target in pt.columns
             ]
             title = f"Numerical Priorities, {start_utc} UTC"
             with dominate.document(title=title) as d:
                 d += tags.h1(title, style="text-align: center")
                 d += util.raw(dataframe_to_datatable(pt, "Numerical_Priority", table_options={"sort": False}))
                 if i > 0:
-                    d.head += tags.a("<-Prev", href=f"Numerical Priorities {start_times[i - 1]}.html")
+                    d.head += tags.a("<-Prev", href=f"Numerical Priorities {start_times[i - 1]}.html", id="prevDay")
                 else:
                     d.head += tags.span("<-Prev")
                 d.head += horizontal_space
                 if i < len(start_times) - 1:
-                    d.head += tags.a("Next->", href=f"Numerical Priorities {start_times[i + 1]}.html")
+                    d.head += tags.a("Next->", href=f"Numerical Priorities {start_times[i + 1]}.html", id="nextDay")
                 else:
                     d.head += tags.span("Next->")
                 d.head += horizontal_space
-                d.head += tags.a("Categorical Priorities", href=f"Categorical Priorities {start_utc}.html")
+                d.head += tags.a("Categorical Priorities", href=f"Categorical Priorities {start_utc}.html", id="categorical")
+                d.head += horizontal_space
+                d.head += tags.a("Summary Page", href="index.html", id="summary")
+                d += tags.script(util.raw(keybinding_script))
                 with open(f"{dir}/Numerical Priorities {start_utc}.html", "w") as f:
                     f.write(d.render())
+
+                # now write target scores pages for each column of the numerical priorities table
+                for target in all_targets:
+                    tt = pl.target_tables[target][i].copy()
+                    tt.index = [f"{time:%H:%M}" for time in tt.index]
+                    title = f"{start_utc} Target Scores for {target}"
+                    with dominate.document(title=title) as d:
+                        d += tags.h1(
+                            tags.a(target, href=f"../targets/{target}.html", id="targets"),
+                            tags.span(style="display: inline-block; width: 10px;"),
+                            f"Target Scores for {start_utc} UTC",
+                            style="text-align: center",
+                        )
+                        d += tags.p(util.raw(dataframe_to_datatable(tt, "Target_Scores", table_options={"sort": False})))
+                        if i > 0:
+                            d.head += tags.a("<-Prev Day", href=f"Target Scores {target} {start_times[i - 1]}.html", id="prevDay")
+                        else:
+                            d.head += tags.span("<-Prev Day")
+                        d.head += horizontal_space
+                        if i < len(start_times) - 1:
+                            d.head += tags.a("Next Day->", href=f"Target Scores {target} {start_times[i + 1]}.html", id="nextDay")
+                        else:
+                            d.head += tags.span("Next Day->")
+                        d.head += horizontal_space
+                        target_index = all_targets.index(target)
+                        if target_index == 0:
+                            d.head += tags.span("<-Prev Target")
+                        else:
+                            d.head += tags.a(
+                                "<-Prev Target", href=f"Target Scores {all_targets[target_index - 1]} {start_utc}.html", id="prevTarget"
+                            )
+                        d.head += horizontal_space
+                        if target_index == len(all_targets) - 1:
+                            d.head += tags.span("Next Target->")
+                        else:
+                            d.head += tags.a(
+                                "Next Target->", href=f"Target Scores {all_targets[target_index + 1]} {start_utc}.html", id="nextTarget"
+                            )
+                        d.head += horizontal_space
+                        d.head += tags.a("Numerical Priorities", href=f"../Numerical Priorities {start_utc}.html", id="numerical")
+                        d.head += horizontal_space
+                        d.head += tags.a("Categorical Priorities", href=f"../Categorical Priorities {start_utc}.html", id="categorical")
+                        d.head += horizontal_space
+                        d.head += tags.a("Summary Page", href="../index.html", id="summary")
+                        d += tags.script(util.raw(keybinding_script))
+                        with open(f"{dir}/target scores/Target Scores {target} {start_utc}.html", "w") as f:
+                            f.write(d.render())
 
     # make pages for categorical priorities
     if pl.categorical_priorities:
@@ -234,7 +295,7 @@ def render_observing_pages(tl: tlc.TargetList, pl: pr.PriorityList, other_files:
         for i, categories_table in enumerate(pl.categorical_priorities):
             ct = categories_table.copy()  # make a copy we can alter for formatting purposes
             if len(ct.columns) == 0:
-                continue # skip cases where there were no targets passing criteria
+                continue  # skip cases where there were no targets passing criteria
             start_utc = start_times[i]
             ct.index = [f"{time:%H:%M}" for time in ct.index]
             highlight_value = pl.category_labels[-1]
@@ -270,16 +331,19 @@ def render_observing_pages(tl: tlc.TargetList, pl: pr.PriorityList, other_files:
                 d += tags.h1(title, style="text-align: center")
                 d += util.raw(dataframe_to_datatable(ct, "Categorical_Priority", table_options={"sort": False}))
                 if i > 0:
-                    d.head += tags.a("<-Prev", href=f"Categorical Priorities {start_times[i - 1]}.html")
+                    d.head += tags.a("<-Prev", href=f"Categorical Priorities {start_times[i - 1]}.html", id="prevDay")
                 else:
                     d.head += tags.span("<-Prev")
                 d.head += horizontal_space
                 if i < len(start_times) - 1:
-                    d.head += tags.a("Next->", href=f"Categorical Priorities {start_times[i + 1]}.html")
+                    d.head += tags.a("Next->", href=f"Categorical Priorities {start_times[i + 1]}.html", id="nextDay")
                 else:
                     d.head += tags.span("Next->")
                 d.head += horizontal_space
-                d.head += tags.a("Numerical Priorities", href=f"Numerical Priorities {start_utc}.html")
+                d.head += tags.a("Numerical Priorities", href=f"Numerical Priorities {start_utc}.html", id="numerical")
+                d.head += horizontal_space
+                d.head += tags.a("Summary Page", href="index.html", id="summary")
+                d += tags.script(util.raw(keybinding_script))
                 with open(f"{dir}/Categorical Priorities {start_utc}.html", "w") as f:
                     f.write(d.render())
 
@@ -314,9 +378,12 @@ def render_observing_pages(tl: tlc.TargetList, pl: pr.PriorityList, other_files:
                     entries = ot[ot["Target Name"] == target_name].drop("Target Name", axis=1)
                 if not entries.empty:
                     d += util.raw(entries.style.hide(axis="index").set_table_styles(table_styles).to_html())
+            d.head += horizontal_space
+            d.head += tags.a("Summary Page", href="../index.html", id="summary")
+            d += tags.script(util.raw(keybinding_script))
             d.footer += tags.p(
                 f"Created {datetime.now().astimezone().isoformat(sep=" ", timespec="seconds")} on {platform.node()}",
                 style="text-align: left; font-style: italic;",
-                )
+            )
             with open(f"{dir}/targets/{target_name}.html", "w") as f:
                 f.write(d.render())
