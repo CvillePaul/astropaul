@@ -120,7 +120,7 @@ def calculate_prior_observation_priority(pl: PriorityList, prior_observation_cat
 def calculate_eclipse_priority(
     pl: PriorityList,
     in_eclipse_name: str = "Eclipse",
-    out_eclipse_name="Not in Eclipse",
+    out_eclipse_name:str = "Not in Eclipse",
     no_eclipse_score: float = 0.2,
     min_altitude: u.Quantity = 30 * u.deg,
 ) -> None:
@@ -136,7 +136,6 @@ def calculate_eclipse_priority(
     else:
         raise ValueError("No target tables are present in PriorityList")
 
-    eclipse_pattern = [out_eclipse_name, in_eclipse_name, out_eclipse_name]
     for target_name, segment_tables in pl.target_tables.items():
         target_events = phase_events[phase_events["Target Name"] == target_name]
         target_systems = [system for system, _ in target_events.groupby("System")]
@@ -152,7 +151,7 @@ def calculate_eclipse_priority(
             # figure out all the eclipses that happen for this target during this segment
             target_eclipses = []  # list of (beg, end) jd values of eclipses.  nan for beg or end indicates partial eclipse
             for (system, member), group in target_events.groupby(["System", "Member"]):
-                if group.empty or len(group) < len(eclipse_pattern):
+                if group.empty or len(group) < 3:
                     continue  # skip this target if it doesn't have enough events to fulfill the full eclipse pattern
                 mask = (group["Event JD"] >= segment_beg) & (group["Event JD"] <= segment_end)
                 segment_events = group[mask].sort_values("Event JD")
