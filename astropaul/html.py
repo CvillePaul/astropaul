@@ -62,7 +62,8 @@ def render_observing_pages(tl: tlc.TargetList, pl: pr.PriorityList, other_files:
     except FileNotFoundError:
         pass  # don't care if directory didn't already exist
     pathlib.Path(f"{dir}/targets").mkdir(parents=True)
-    pathlib.Path(f"{dir}/target scores").mkdir(parents=True)
+    if pl:
+        pathlib.Path(f"{dir}/target scores").mkdir(parents=True)
 
     horizontal_space = tags.span(style="display: inline-block; width: 20px;")
     keybinding_script = textwrap.dedent(
@@ -84,24 +85,25 @@ def render_observing_pages(tl: tlc.TargetList, pl: pr.PriorityList, other_files:
         border = 1
         padding = 10
         d += tags.h1(tl.name)
-        # output information about the observing session
-        d += tags.h2("Observing session details:")
-        t = tags.table(border=border, cellpadding=padding)
-        with t:
-            tags.tr(
-                tags.td("Site"),
-                tags.td(pl.session.site_info),
-            )
-            tags.tr(
-                tags.td("Available Time"),
-                tags.td(f"{pl.session.total_time.to(u.hour).value:.1f} hours in {len(pl.segments)} observing segments"),
-            )
-            time_range = pl.session.time_range
-            tags.tr(
-                tags.td("UTC Range"),
-                tags.td(f"{time_range[0].iso[:19]} through {time_range[1].iso[:19]}"),
-            )
-        d += t
+        if pl:
+            # output information about the observing session
+            d += tags.h2("Observing session details:")
+            t = tags.table(border=border, cellpadding=padding)
+            with t:
+                tags.tr(
+                    tags.td("Site"),
+                    tags.td(pl.session.site_info),
+                )
+                tags.tr(
+                    tags.td("Available Time"),
+                    tags.td(f"{pl.session.total_time.to(u.hour).value:.1f} hours in {len(pl.segments)} observing segments"),
+                )
+                time_range = pl.session.time_range
+                tags.tr(
+                    tags.td("UTC Range"),
+                    tags.td(f"{time_range[0].iso[:19]} through {time_range[1].iso[:19]}"),
+                )
+            d += t
         d += tags.br()
         # output information about the targets
         d += tags.h2(
@@ -129,29 +131,30 @@ def render_observing_pages(tl: tlc.TargetList, pl: pr.PriorityList, other_files:
                 d += tags.br()
             d += tags.br()
 
-        # output information about target priorities
-        d += tags.h2(f"Priorities ({pl.interval} interval)")
-        t = tags.table(border=border, cellpadding=padding)
-        with t:
-            tags.tr(tags.th("Start UTC"), tags.th("Finish UTC"), tags.th(), tags.th())
-            first_iteration = True
-            for subsegments in pl.segments:
-                beg = subsegments[0][0]
-                end = subsegments[-1][1]
-                if first_iteration:
-                    numerical_id = "numerical"
-                    categorical_id = "categorical"
-                    first_iteration = False
-                else:
-                    numerical_id = "numerical_other"
-                    categorical_id = "categorical_other"
-                tags.tr(
-                    tags.td(beg.iso[:19]),
-                    tags.td(end.iso[:19]),
-                    tags.td(tags.a("Numerical", href=f"Numerical Priorities {beg.iso[:10]}.html", id=numerical_id)),
-                    tags.td(tags.a("Categorical", href=f"Categorical Priorities {beg.iso[:10]}.html", id=categorical_id)),
-                )
-        d += t
+        if pl:
+            # output information about target priorities
+            d += tags.h2(f"Priorities ({pl.interval} interval)")
+            t = tags.table(border=border, cellpadding=padding)
+            with t:
+                tags.tr(tags.th("Start UTC"), tags.th("Finish UTC"), tags.th(), tags.th())
+                first_iteration = True
+                for subsegments in pl.segments:
+                    beg = subsegments[0][0]
+                    end = subsegments[-1][1]
+                    if first_iteration:
+                        numerical_id = "numerical"
+                        categorical_id = "categorical"
+                        first_iteration = False
+                    else:
+                        numerical_id = "numerical_other"
+                        categorical_id = "categorical_other"
+                    tags.tr(
+                        tags.td(beg.iso[:19]),
+                        tags.td(end.iso[:19]),
+                        tags.td(tags.a("Numerical", href=f"Numerical Priorities {beg.iso[:10]}.html", id=numerical_id)),
+                        tags.td(tags.a("Categorical", href=f"Categorical Priorities {beg.iso[:10]}.html", id=categorical_id)),
+                    )
+            d += t
         d += tags.script(util.raw(keybinding_script))
         with open(f"{dir}/index.html", "w") as f:
             f.write(d.render())
@@ -179,12 +182,14 @@ def render_observing_pages(tl: tlc.TargetList, pl: pr.PriorityList, other_files:
                 title,
                 table_options={
                     "showIndex": False,
-                    "search": True,
                     "layout": {
                         "topStart": {
-                            "searchBuilder": True,
+                            "search": True,
                             "buttons": buttons,
-                        }
+                        },
+                        "topEnd": {
+                            "searchBuilder": True,
+                        },
                     },
                 },
             )
@@ -194,7 +199,7 @@ def render_observing_pages(tl: tlc.TargetList, pl: pr.PriorityList, other_files:
             f.write(d.render())
 
     # make pages for numerical priorities
-    if pl.numerical_priorities:
+    if pl and pl.numerical_priorities:
         start_times = [f"{pt.index[0]:%Y-%m-%d}" for pt in pl.numerical_priorities]
         for i, priority_table in enumerate(pl.numerical_priorities):
             pt = priority_table.copy()
@@ -290,7 +295,7 @@ def render_observing_pages(tl: tlc.TargetList, pl: pr.PriorityList, other_files:
                             f.write(d.render())
 
     # make pages for categorical priorities
-    if pl.categorical_priorities:
+    if pl and pl.categorical_priorities:
         start_times = [f"{pt.index[0]:%Y-%m-%d}" for pt in pl.categorical_priorities]
         for i, categories_table in enumerate(pl.categorical_priorities):
             ct = categories_table.copy()  # make a copy we can alter for formatting purposes
