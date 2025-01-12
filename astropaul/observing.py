@@ -19,11 +19,11 @@ class ObservingSession:
         answer = self.site_info + "\n"
         if self.observing_segments:
             answer += f"{self.total_time.to(u.hour):.1f} total observing time\n"
-            answer += "Observing segments:\n"
             num_segments = len(self.observing_segments)
             if num_segments < 10:
+                answer += f"Observing segments ({num_segments}):\n"
                 for beg, end in self.observing_segments:
-                    answer += f"    {beg.iso[:19]} to {end.iso[:19]}\n"
+                    answer += f"    {(end - beg).to(u.hour).value:.1f} hours: {beg.iso[:19]} to {end.iso[:19]}\n"
             else:
                 answer += f"{num_segments} segments, from {self.observing_segments[0][0].iso[:19]} to {self.observing_segments[-1][-1].iso[:19]}\n"
         else:
@@ -68,6 +68,7 @@ class ObservingSession:
 
     def add_full_day(self, day: str | Time):
         self.observing_segments.append(self._determine_nighttime(Time(day)))
+        return self
 
     def add_half_day(self, day: str | Time, first_half: bool = True):
         beg, end = self._determine_nighttime(Time(day))
@@ -76,13 +77,15 @@ class ObservingSession:
             self.observing_segments.append((beg, mid))
         else:
             self.observing_segments.append((mid, end))
+        return self
 
     def add_day_range(self, beg: str | Time, end: str | Time):
-        beg, end = Time(beg), Time(end)
-        day = beg
-        while day < end:
+        end_time = Time(end) + 1 * u.day
+        day = Time(beg)
+        while day < end_time:
             self.add_full_day(day)
             day += 1 * u.day
+        return self
 
     def calc_subsegments(
         self, interval: u.Quantity = 1 * u.hour, top_of_hour: bool = True, skip_partial: bool = True
