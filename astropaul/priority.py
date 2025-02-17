@@ -24,6 +24,9 @@ class PriorityList:
         self.interval = interval
         self.targets = target_list.target_list["Target Name"]  # TODO: remove hard coded column name
         self.segments = session.calc_subsegments(interval)
+        self.moon_illumination = [
+            np.average([ap.moon_illumination(segment[0][0]), ap.moon_illumination(segment[-1][1])]) for segment in self.segments
+        ]
         self.target_tables = {}  # key=target name, value = list[dataframe], one per observing segment, indexed by subsegment
         for target in self.targets:
             tables = []
@@ -120,7 +123,7 @@ def calculate_prior_observation_priority(pl: PriorityList, prior_observation_cat
 def calculate_eclipse_priority(
     pl: PriorityList,
     in_eclipse_name: str = "Eclipse",
-    out_eclipse_name:str = "Not in Eclipse",
+    out_eclipse_name: str = "Not in Eclipse",
     no_eclipse_score: float = 0.2,
     min_altitude: u.Quantity = 30 * u.deg,
 ) -> None:
@@ -242,6 +245,144 @@ def calculate_phase_priority(pl: PriorityList, phase_defs: list[ph.PhaseEventDef
                 whole_state = "|".join(sorted(row[system_cols]))
                 overall_priorities.append(phase_categories[whole_state])
             table["Phase Priority"] = overall_priorities
+
+
+def prioritize_phase_sequence(
+    pl: PriorityList,
+    sequence: list[str],
+    sequence_name: str,
+    beg_partial_ok: bool = False,
+    end_partial_ok: bool = False,
+    allow_overlap: bool = False,
+) -> None:
+    """Look for times when phase event(s) occur in the pattern specified by `sequence`
+    If found, `sequence_name` will be placed in all relevant subsegment rows.
+    If `beg_partial_ok` is True, it's ok if the first phase event is already underway at beginning of observing segment.
+    If `end_partial_ok` is True, it's ok if the last phase event doesn't end until after the end of observing segment.
+    If `allow_overlap` is True, it's ok if one system has a sequence that overlaps another system's sequence for the same target.
+    """
+    required_table = "Phase Events"
+    phase_events = pl.target_list.other_lists.get(required_table, pd.DataFrame())
+    if phase_events.empty:
+        raise ValueError(f"TargetList does not have a {required_table} table")
+    sequence_length = len(sequence)
+    sequence_column = f"{sequence_name} Sequence"
+    priority_column = f"{sequence_name} Priority"
+    for target_name, target_tables in pl.target_tables.items():
+        for target_table , (segment_beg, segment_end) in zip(target_tables, pl.session.observing_segments):
+            target_table[sequence_column] = ""
+            target_table[priority_column] = 0.0
+            segment_events = phase_events[
+                (phase_events["Target Name"] == target_name)
+                & (phase_events["Beg JD"] >= segment_beg.jd)
+                & (phase_events["End JD"] <= segment_end.jd)
+                ]
+            segment_sequences = []
+            if segment_events.empty or len(segment_events) < sequence_length:
+                continue
+            for (system, member), component_events in segment_events.groupby(["System", "Member"]):
+                if len(component_events) < sequence_length:
+                    continue
+                for start in range(len(component_events) - sequence_length + 1):
+                    window = component_events["Event"].iloc[start:start + sequence_length].tolist()
+                    if window == sequence:
+                        sequence_beg = component_events.iloc[start]["Beg JD"]
+                        if not beg_partial_ok and sequence_beg == segment_beg.jd:
+                            continue # first event of sequence must start after segment begin
+                        sequence_end = component_events.iloc[start + sequence_length - 1]["End JD"]
+                        if not end_partial_ok and sequence_end == segment_end.jd:
+                            continue # last event of sequence mush finish before segment end
+                        component = system + member
+                        segment_sequences.append((component, sequence_beg, sequence_end))
+            if not segment_sequences:
+                continue
+            if not allow_overlap:
+                pass # TODO: remove overlapping segments from sequences list
+            for component, sequence_beg, sequence_end in segment_sequences:
+                sequence_beg_ts = pd.Timestamp(Time(sequence_beg, format="jd").to_datetime())
+                sequence_end_ts = pd.Timestamp(Time(sequence_end, format="jd").to_datetime())
+                rows = target_table.index[(sequence_beg_ts <= target_table.index) & (target_table.index <= sequence_end_ts)]
+                target_table.loc[rows, sequence_column] = component
+                if (target_table.loc[rows, "Altitude Priority"] > 0).all():
+                    target_table.loc[rows, priority_column] = 1.0
+                else:
+                    target_table.loc[rows, priority_column] = 0.0
+
+
+
+
+
+def calculate_side_priority(pl: PriorityList, side_phases: list[str], repeat_penalty=0.1) -> None:
+    """Look through the history of speckle measurements of a target, noting all that captured targets in the desired phase(s).
+    Prioritize targets that undergo an eclipse of a new system and/or member during an observing segment.
+    Partially prioritize targets that undergo an eclipse already captured by previous speckle observation(s).
+    For each previous observation, subtract `repeat_penalty` from the score for that eclipse event"""
+    required_tables = {
+        "Ephem",
+        "Speckle Phases",
+        "Phase Events",
+    }
+    existing_tables = set(pl.target_list.other_lists.keys())
+    if not existing_tables.issuperset(required_tables):
+        raise ValueError(f"One or more required table missing: {', '.join(required_tables - existing_tables)}")
+
+    # define what kind of eclipses we care about, eg: any A, or Aa specifically, etc.
+    def calc_eclipse_type(row, prefix=""):
+        return row[f"{prefix}System"]  # + row[f"{prefix}Member"]
+
+    # from the ephem table, build a dictionary of all observable eclipses: dict[target, dict[eclipse_type, count]]
+    eclipse_counts = {}
+    for target_name, row in pl.target_list.other_lists["Ephem"].iterrows():
+        eclipse_type = calc_eclipse_type(row, "Ephem ")
+        target_counts = eclipse_counts.get(target_name, {})
+        target_counts[eclipse_type] = 0
+        eclipse_counts[target_name] = target_counts
+
+    # update the values in the dictionary to reflect eclipses captured during previous speckle observations
+    speckle_phases = pl.target_list.other_lists["Speckle Phases"]
+    for _, row in speckle_phases.iterrows():
+        if not row["State"] in side_phases:
+            continue
+        target_name = row["Target Name"]
+        eclipse_type = calc_eclipse_type(row)
+        try:
+            target_counts = eclipse_counts[target_name]
+            target_counts[eclipse_type] += 1
+        except:
+            raise ValueError(
+                f"Target {target_name} has observation for system/member {eclipse_type} but no corresponding entry in ephemerides table"
+            )
+
+    # add a SIDE Priority column to every priority table
+    for segment_tables in pl.target_tables.values():
+        for segment_table in segment_tables:
+            segment_table["SIDE Observations"] = ""
+            segment_table["SIDE Priority"] = 0.0
+
+    # for each eclipse during an observing segment, give the subsegment containing that event a score dependent on prior observations
+    phase_events = pl.target_list.other_lists["Phase Events"]
+    for _, row in phase_events.iterrows():
+        if not row["Event"] in side_phases:
+            continue
+        target_name = row["Target Name"]
+        eclipse_time = Time(row["Event JD"], format="jd").to_datetime()
+        segment_table = pd.DataFrame()
+        for segment in pl.target_tables[target_name]:
+            if segment.index[0] <= eclipse_time <= segment.index[-1]:
+                segment_table = segment
+                break
+        if segment_table.empty:
+            continue
+        sub_segment = segment_table.index[segment_table.index <= eclipse_time].max()
+        if pd.notna(sub_segment) == False:
+            raise ValueError(
+                f"Table spans {segment_table.index[0]} to {segment_table.index[-1]} but does not surround {eclipse_time}"
+            )
+        eclipse_type = calc_eclipse_type(row)
+        prev_observations = eclipse_counts[target_name][eclipse_type]
+        score = 1 - repeat_penalty * prev_observations
+        segment_table.loc[sub_segment, "SIDE Observations"] = eclipse_type
+        segment_table.loc[sub_segment, "SIDE Priority"] = score
 
 
 def calculate_overall_priority(pl: PriorityList) -> None:
