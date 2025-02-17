@@ -54,53 +54,6 @@ class TargetList:
             answer += f"    {len(other):4d} rows, {len(other.columns):2d} columns: {name}\n"
         return answer
 
-    def to_html(self, file: str = None) -> str:
-        return ""
-        # buttons = [
-        #     {
-        #         "extend": "columnToggle",
-        #         "columns": [f"{col}:title" for col in secondary_cols],
-        #         "text": group,
-        #         "redrawCalculations": True,
-        #     }
-        #     for group, (_, secondary_cols) in self.column_groups.items()
-        #     if secondary_cols
-        # ]
-        # table_name = "targetList"
-        # caption = f"{self.name}, created {datetime.datetime.now().astimezone().isoformat(sep=" ", timespec="seconds")} on {platform.node()}"
-        # html = f'<h1 style="text-align: center">{self.name}</h1>\n'
-        # html += itables.to_html_datatable(
-        #     self.target_list,
-        #     caption=caption,
-        #     table_id=table_name,
-        #     connected=True,
-        #     paging=False,
-        #     showIndex=False,
-        #     maxBytes=0,
-        #     maxColumns=0,
-        #     autoWidth=False,
-        #     layout={"topStart": {"searchBuilder": True, "buttons": buttons}},
-        #     classes="display nowrap compact cell-border",
-        #     # columnDefs=[{"targets": ["Target Source:title"], "visible": False}],
-        # )
-        # html += f"""
-        #     <style>
-        #     #{table_name} th {{
-        #         white-space: normal;
-        #         word-wrap: break-word;
-        #     }}
-        #     caption {{
-        #         text-align: left;
-        #         font-style: italic;
-        #     }}
-        #     </style>
-        #     """
-
-        # if file:
-        #     with open(file, "w") as f:
-        #         f.write(html)
-        # return html
-
     @classmethod
     def merge(
         cls,
@@ -232,9 +185,9 @@ def add_pepsi(tl: TargetList, column_prefix="PEPSI ", **kwargs) -> TargetList:
         from tom_spectrumrawdata as srd
         join tom_target as t on t.id = srd.target_id
         """,
-        kwargs["connection"], 
+        kwargs["connection"],
         index_col="Target Name",
-        )
+    )
     existing_targets = tl.target_list["Target Name"].to_list()
     spectra = spectra[spectra.index.isin(existing_targets)]
     new_column_names = {column: f"{column_prefix}{column.capitalize()}" for column in spectra.columns}
@@ -270,7 +223,7 @@ def add_lists(tl: TargetList, column_prefix="List ", **kwargs) -> TargetList:
     return answer
 
 
-def add_ephemerides(tl: TargetList, column_prefix="Ephem ", **kwargs) -> TargetList:
+def add_ephemerides(tl: TargetList, **kwargs) -> TargetList:
     ephem = pd.read_sql(
         """
         select t.name "Target Name", bp.system, bp.member, bp.period, bp.t0, bp.duration, bp.depth
@@ -285,10 +238,10 @@ def add_ephemerides(tl: TargetList, column_prefix="Ephem ", **kwargs) -> TargetL
     ephem = ephem[ephem.index.isin(existing_targets)]
     ephem["period"] = ephem["period"] / 3600 / 24  # convert from seconds to days for convenience
     ephem["duration"] = ephem["duration"] / 3600 / 24  # convert from seconds to days for convenience
-    new_column_names = {column: f"{column_prefix}{column.capitalize()}" for column in ephem.columns}
+    new_column_names = {column: column.capitalize() for column in ephem.columns}
     ephem.rename(columns=new_column_names, inplace=True)
     answer = tl.copy()
-    answer.add_other(column_prefix.strip().replace("_", ""), ephem)
+    answer.add_other("Ephem", ephem)
     return answer
 
 
@@ -296,22 +249,40 @@ def add_phase_events(
     tl: TargetList, observing_session: ObservingSession, phase_event_defs: list[ph.PhaseEventDef], **kwargs
 ) -> TargetList:
     """Calculate what phase events are in effect for each observing segment"""
-    if (ephem_table := tl.other_lists.get("Ephem", None)).empty:
+    if (ephem_table := tl.other_lists.get("Ephem", pd.DataFrame())).empty:
         raise ValueError("Ephem table not present")
     answer = tl.copy()
     ephems = {}
-    phase_events = pd.DataFrame(columns=["Target Name", "System", "Member", "Orbit Num", "Event JD", "Phase", "Event", "Event UTC"])
-    for target_name, ephem_row in ephem_table.sort_values(["Ephem System", "Ephem Member"]).iterrows():
+    phase_events = pd.DataFrame(
+        columns=["Target Name", "System", "Member", "Orbit Num", "Beg JD", "Phase", "Event", "End JD", "Beg UTC", "End UTC"]
+    )
+    for target_name, ephem_row in ephem_table.sort_values(["System", "Member"]).iterrows():
         ephem = ph.Ephemeris.from_dataframe_row(ephem_row)
         ephems[target_name] = ephems.get(target_name, []) + [ephem]
-    for (beg, end) in observing_session.observing_segments:
+    for beg, end in observing_session.observing_segments:
         for target_name, ephem_list in ephems.items():
             for ephem in ephem_list:
-                event_list = ph.PhaseEventList.calc_phase_events(ephem, phase_event_defs, beg.jd, end.jd)
-                for event in event_list.events:
-                    if event.jd != event.jd:
-                        event.jd = beg.jd # fix nan jd value for events in effect at start of segment
-                    phase_events.loc[len(phase_events)] = [target_name] + event.to_list() + [Time(event.jd, format="jd").iso[:19]]
+                event_list = ph.PhaseEventList.calc_phase_events(ephem, phase_event_defs, beg.jd, end.jd).events
+                event_list[0].jd = beg.jd # treat first event as if it had started at segment beginning
+                # set end time equal to begin time of next event, or if last event to segment end
+                num_events = len(event_list)
+                end_jds = [0.0] * num_events
+                end_utcs = [""] * num_events
+                for i in range(num_events):
+                    if i == num_events - 1:
+                        end_jd = end.jd
+                    else:
+                        end_jd = event_list[i + 1].jd
+                    end_jds[i] = end_jd
+                    end_utcs[i] = Time(end_jd, format="jd").iso[:19]
+
+                # populate table with all values except end times
+                for event, end_jd, end_utc in zip(event_list, end_jds, end_utcs):
+                    phase_events.loc[len(phase_events)] = (
+                        [target_name]
+                        + event.to_list()
+                        + [end_jd, Time(event.jd, format="jd").iso[:19], end_utc]
+                    )
     answer.other_lists["Phase Events"] = phase_events
     return answer
 
@@ -385,7 +356,6 @@ def add_observability(
     constraints: list[ap.Constraint] = None,
     column_prefix: str = "Observable ",
     calc_moon_distance: bool = False,
-
     **kwargs,
 ) -> TargetList:
     lo_alt, hi_alt = observability_threshold[0].to(u.deg).value, observability_threshold[1].to(u.deg).value
@@ -407,7 +377,9 @@ def add_observability(
     for beg, end in observing_session.observing_segments:
         time_grid = ap.utils.time_grid_from_range((beg, end), time_resolution=time_resolution)
         segment_alts = [observing_session.observer.altaz(time_grid, coord).alt.value for coord in coords]
-        segment_good_alts = [len(target_alts[(lo_alt <= target_alts) & (target_alts <= hi_alt)]) for target_alts in segment_alts]
+        segment_good_alts = [
+            len(target_alts[(lo_alt <= target_alts) & (target_alts <= hi_alt)]) for target_alts in segment_alts
+        ]
         segment_hours_observable = (segment_good_alts * time_resolution).to(u.hour).value
         segment_max_alts = [np.max(target_alts) for target_alts in segment_alts]
         segment_observability = list(map(lambda x: x > 0, segment_good_alts))
@@ -417,7 +389,10 @@ def add_observability(
         overall_every_night &= segment_observability
         nightly_columns.append(column_name)
         hours_observable_column = f"{column_name} Hours Observable"
-        overall_min_hours_observable = [np.min([current_min_hours, this_min_hours]) for current_min_hours, this_min_hours in zip(overall_min_hours_observable, segment_hours_observable)]
+        overall_min_hours_observable = [
+            np.min([current_min_hours, this_min_hours])
+            for current_min_hours, this_min_hours in zip(overall_min_hours_observable, segment_hours_observable)
+        ]
         answer.target_list[hours_observable_column] = segment_hours_observable
         nightly_columns.append(hours_observable_column)
         max_alt_column = f"{column_name} Max Alt"
@@ -477,17 +452,18 @@ def filter_targets(
 def add_speckle_phase(tl: TargetList, phase_event_defs: list[ph.PhaseEventDef], **kwargs) -> TargetList:
     """Calculate what PhaseEventDef was most in effect during a speckle observation"""
     required_tables = {"Speckle", "Ephem"}
-    if not set(tl.other_lists.keys()).issuperset(required_tables):
-        raise ValueError(f"One or more required table missing: {', '.join(required_tables)}")
+    existing_tables = set(tl.other_lists.keys())
+    if not existing_tables.issuperset(required_tables):
+        raise ValueError(f"One or more required table missing: {', '.join(required_tables - existing_tables)}")
     answer = tl.copy()
     ephem_table = tl.other_lists["Ephem"]
     speckle_phases = pd.DataFrame(columns=["Target Name", "Speckle Session", "JD Mid", "UTC Mid", "System", "Member", "State"])
     for target_name, speckle in tl.other_lists["Speckle"].iterrows():
-        ephem_rows = ephem_table.loc[target_name]
+        ephem_rows = ephem_table[ephem_table.index == target_name]
         if ephem_rows.empty:
             continue
         beg, end = speckle["Speckle Start"], speckle["Speckle End"]
-        for _, ephem_row in ephem_rows.sort_values(["Ephem System", "Ephem Member"]).iterrows():
+        for _, ephem_row in ephem_rows.sort_values(["System", "Member"]).iterrows():
             ephem = ph.Ephemeris.from_dataframe_row(ephem_row)
             state = ph.PhaseEventList.calc_phase_events(ephem, phase_event_defs, beg, end).calc_longest_span(beg, end)
             speckle_phases.loc[len(speckle_phases)] = [
@@ -495,8 +471,8 @@ def add_speckle_phase(tl: TargetList, phase_event_defs: list[ph.PhaseEventDef], 
                 int(speckle["Speckle Session"]),
                 speckle["Speckle Mid"],
                 Time(speckle["Speckle Mid"], format="jd").iso[:18],
-                ephem_row["Ephem System"],
-                ephem_row["Ephem Member"],
+                ephem_row["System"],
+                ephem_row["Member"],
                 state,
             ]
     if not speckle_phases.empty:

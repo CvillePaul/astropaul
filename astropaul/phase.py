@@ -16,7 +16,7 @@ class Ephemeris:
     # eccentricity: float
 
     def from_dataframe_row(row: pd.DataFrame) -> "Ephemeris":
-        return Ephemeris(*row[["Ephem System", "Ephem Member", "Ephem T0", "Ephem Period", "Ephem Duration"]])
+        return Ephemeris(*row[["System", "Member", "T0", "Period", "Duration"]])
 
 @dataclass
 class PhaseEvent:
