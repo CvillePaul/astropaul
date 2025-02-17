@@ -6,6 +6,7 @@ import shutil
 import textwrap
 
 import astropy.units as u
+from astropy.time import Time
 import dominate
 import dominate.tags as tags
 import dominate.util as util
@@ -103,6 +104,10 @@ def render_observing_pages(tl: tlc.TargetList, pl: pr.PriorityList, other_files:
                     tags.td("UTC Range"),
                     tags.td(f"{time_range[0].iso[:19]} through {time_range[1].iso[:19]}"),
                 )
+                tags.tr(
+                    tags.td("JD Range"),
+                    tags.td(f"{time_range[0].jd} through {time_range[1].jd}"),
+                )
             d += t
         d += tags.br()
         # output information about the targets
@@ -135,10 +140,11 @@ def render_observing_pages(tl: tlc.TargetList, pl: pr.PriorityList, other_files:
             # output information about target priorities
             d += tags.h2(f"Priorities ({pl.interval} interval)")
             t = tags.table(border=border, cellpadding=padding)
+            t.set_attribute("style", "text-align: center;")
             with t:
-                tags.tr(tags.th("Start UTC"), tags.th("Finish UTC"), tags.th(), tags.th())
+                tags.tr(tags.th("Start UTC"), tags.th("Finish UTC"), tags.th("Moon Illumination"), tags.th(), tags.th())
                 first_iteration = True
-                for subsegments in pl.segments:
+                for subsegments, illumination in zip(pl.segments, pl.moon_illumination):
                     beg = subsegments[0][0]
                     end = subsegments[-1][1]
                     if first_iteration:
@@ -148,9 +154,16 @@ def render_observing_pages(tl: tlc.TargetList, pl: pr.PriorityList, other_files:
                     else:
                         numerical_id = "numerical_other"
                         categorical_id = "categorical_other"
+                    beg_cell = tags.td(beg.iso[:19])
+                    beg_cell.add(tags.br())
+                    beg_cell.add(beg.jd)
+                    end_cell = tags.td(end.iso[:19])
+                    end_cell.add(tags.br())
+                    end_cell.add(end.jd)
                     tags.tr(
-                        tags.td(beg.iso[:19]),
-                        tags.td(end.iso[:19]),
+                        beg_cell,
+                        end_cell,
+                        tags.td(f"{illumination:.2f}"),
                         tags.td(tags.a("Numerical", href=f"Numerical Priorities {beg.iso[:10]}.html", id=numerical_id)),
                         tags.td(tags.a("Categorical", href=f"Categorical Priorities {beg.iso[:10]}.html", id=categorical_id)),
                     )
