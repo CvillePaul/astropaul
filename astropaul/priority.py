@@ -254,12 +254,14 @@ def prioritize_phase_sequence(
     beg_partial_ok: bool = False,
     end_partial_ok: bool = False,
     allow_overlap: bool = False,
+    entirely_observable: bool = False,
 ) -> None:
     """Look for times when phase event(s) occur in the pattern specified by `sequence`
     If found, `sequence_name` will be placed in all relevant subsegment rows.
     If `beg_partial_ok` is True, it's ok if the first phase event is already underway at beginning of observing segment.
     If `end_partial_ok` is True, it's ok if the last phase event doesn't end until after the end of observing segment.
     If `allow_overlap` is True, it's ok if one system has a sequence that overlaps another system's sequence for the same target.
+    If `entirely_observable` is True, de-prioritize the entire sequence if any part of it has zero Altitude Priority.
     """
     required_table = "Phase Events"
     phase_events = pl.target_list.other_lists.get(required_table, pd.DataFrame())
@@ -269,14 +271,14 @@ def prioritize_phase_sequence(
     sequence_column = f"{sequence_name} Sequence"
     priority_column = f"{sequence_name} Priority"
     for target_name, target_tables in pl.target_tables.items():
-        for target_table , (segment_beg, segment_end) in zip(target_tables, pl.session.observing_segments):
+        for target_table, (segment_beg, segment_end) in zip(target_tables, pl.session.observing_segments):
             target_table[sequence_column] = ""
             target_table[priority_column] = 0.0
             segment_events = phase_events[
                 (phase_events["Target Name"] == target_name)
                 & (phase_events["Beg JD"] >= segment_beg.jd)
                 & (phase_events["End JD"] <= segment_end.jd)
-                ]
+            ]
             segment_sequences = []
             if segment_events.empty or len(segment_events) < sequence_length:
                 continue
@@ -284,35 +286,32 @@ def prioritize_phase_sequence(
                 if len(component_events) < sequence_length:
                     continue
                 for start in range(len(component_events) - sequence_length + 1):
-                    window = component_events["Event"].iloc[start:start + sequence_length].tolist()
+                    window = component_events["Event"].iloc[start : start + sequence_length].tolist()
                     if window == sequence:
                         sequence_beg = component_events.iloc[start]["Beg JD"]
                         if not beg_partial_ok and sequence_beg == segment_beg.jd:
-                            continue # first event of sequence must start after segment begin
+                            continue  # first event of sequence must start after segment begin
                         sequence_end = component_events.iloc[start + sequence_length - 1]["End JD"]
                         if not end_partial_ok and sequence_end == segment_end.jd:
-                            continue # last event of sequence mush finish before segment end
+                            continue  # last event of sequence mush finish before segment end
                         component = system + member
                         segment_sequences.append((component, sequence_beg, sequence_end))
             if not segment_sequences:
                 continue
             if not allow_overlap:
-                pass # TODO: remove overlapping segments from sequences list
+                pass  # TODO: remove overlapping segments from sequences list
             for component, sequence_beg, sequence_end in segment_sequences:
                 sequence_beg_ts = pd.Timestamp(Time(sequence_beg, format="jd").to_datetime())
                 sequence_end_ts = pd.Timestamp(Time(sequence_end, format="jd").to_datetime())
                 rows = target_table.index[(sequence_beg_ts <= target_table.index) & (target_table.index <= sequence_end_ts)]
                 target_table.loc[rows, sequence_column] = component
-                if (target_table.loc[rows, "Altitude Priority"] > 0).all():
+                if (target_table.loc[rows, "Altitude Priority"] > 0).any() or not entirely_observable:
                     target_table.loc[rows, priority_column] = 1.0
                 else:
                     target_table.loc[rows, priority_column] = 0.0
 
 
-
-
-
-def calculate_side_priority(pl: PriorityList, side_phases: list[str], repeat_penalty=0.1) -> None:
+def prioritize_side_observation(pl: PriorityList, side_phases: list[str], eclipse_column: str = "Eclipse") -> None:
     """Look through the history of speckle measurements of a target, noting all that captured targets in the desired phase(s).
     Prioritize targets that undergo an eclipse of a new system and/or member during an observing segment.
     Partially prioritize targets that undergo an eclipse already captured by previous speckle observation(s).
@@ -327,63 +326,61 @@ def calculate_side_priority(pl: PriorityList, side_phases: list[str], repeat_pen
         raise ValueError(f"One or more required table missing: {', '.join(required_tables - existing_tables)}")
 
     # define what kind of eclipses we care about, eg: any A, or Aa specifically, etc.
-    def calc_eclipse_type(row, prefix=""):
-        return row[f"{prefix}System"]  # + row[f"{prefix}Member"]
+    def calc_eclipse_type(row):
+        return row["System"]  # + row["Member"]
+    # split a comma-separated list of prior observations into a set of eclipse types
+    def parse_side_opportunities(opportunities):
+        answer = set()
+        for opportunity in opportunities.split(", "):
+            answer.add(opportunity[0:1]) # only take System portion of eclipse type
+        return answer
 
-    # from the ephem table, build a dictionary of all observable eclipses: dict[target, dict[eclipse_type, count]]
-    eclipse_counts = {}
+    # for each target, build a set of all possible eclipses: dict[target, set[eclipse_type]]
+    possible_eclipses = {}
     for target_name, row in pl.target_list.other_lists["Ephem"].iterrows():
-        eclipse_type = calc_eclipse_type(row, "Ephem ")
-        target_counts = eclipse_counts.get(target_name, {})
-        target_counts[eclipse_type] = 0
-        eclipse_counts[target_name] = target_counts
+        eclipse_type = calc_eclipse_type(row)
+        target_possible = possible_eclipses.get(target_name, set())
+        target_possible.add(eclipse_type)
+        possible_eclipses[target_name] = target_possible
 
-    # update the values in the dictionary to reflect eclipses captured during previous speckle observations
+    # build a dictionary that lists all eclipse types already observed in prior speckle sessions: dict[target, set[eclipse_type]]
+    prior_observations = {}
     speckle_phases = pl.target_list.other_lists["Speckle Phases"]
     for _, row in speckle_phases.iterrows():
         if not row["State"] in side_phases:
             continue
         target_name = row["Target Name"]
         eclipse_type = calc_eclipse_type(row)
-        try:
-            target_counts = eclipse_counts[target_name]
-            target_counts[eclipse_type] += 1
-        except:
-            raise ValueError(
-                f"Target {target_name} has observation for system/member {eclipse_type} but no corresponding entry in ephemerides table"
-            )
+        target_observed = prior_observations.get(target_name, set())
+        target_observed.add(eclipse_type)
+        prior_observations[target_name] = target_observed
 
-    # add a SIDE Priority column to every priority table
-    for segment_tables in pl.target_tables.values():
-        for segment_table in segment_tables:
-            segment_table["SIDE Observations"] = ""
-            segment_table["SIDE Priority"] = 0.0
+    # add a column to the target list table indicating number of prior SIDE observations
+    tl = pl.target_list.target_list
+    tl["Num SIDE"] = [len(prior_observations.get(target_name, set())) for target_name in tl["Target Name"]]
 
-    # for each eclipse during an observing segment, give the subsegment containing that event a score dependent on prior observations
-    phase_events = pl.target_list.other_lists["Phase Events"]
-    for _, row in phase_events.iterrows():
-        if not row["Event"] in side_phases:
-            continue
-        target_name = row["Target Name"]
-        eclipse_time = Time(row["Event JD"], format="jd").to_datetime()
-        segment_table = pd.DataFrame()
-        for segment in pl.target_tables[target_name]:
-            if segment.index[0] <= eclipse_time <= segment.index[-1]:
-                segment_table = segment
-                break
-        if segment_table.empty:
-            continue
-        sub_segment = segment_table.index[segment_table.index <= eclipse_time].max()
-        if pd.notna(sub_segment) == False:
-            raise ValueError(
-                f"Table spans {segment_table.index[0]} to {segment_table.index[-1]} but does not surround {eclipse_time}"
-            )
-        eclipse_type = calc_eclipse_type(row)
-        prev_observations = eclipse_counts[target_name][eclipse_type]
-        score = 1 - repeat_penalty * prev_observations
-        segment_table.loc[sub_segment, "SIDE Observations"] = eclipse_type
-        segment_table.loc[sub_segment, "SIDE Priority"] = score
+    # add an empty SIDE Priority column to every priority table
+    for target_tables in pl.target_tables.values():
+        for target_table in target_tables:
+            target_table["Prior SIDE Observations"] = ""
+            target_table["SIDE Priority"] = 0.0
 
+    # for each eclipse during an observing segment, prioritize it if it's a new eclipse type
+    for target_name, target_tables in pl.target_tables.items():
+        target_observed = prior_observations.get(target_name, set())
+        target_possible = possible_eclipses[target_name]
+        for target_table in target_tables:
+            for index, row in target_table.iterrows():
+                opportunities_string = row[f"{eclipse_column} Sequence"]
+                if not opportunities_string:
+                    continue
+                target_table.loc[index, "Prior SIDE Observations"] = ", ".join(target_observed)
+                side_opportunities = parse_side_opportunities(opportunities_string)
+                new_opportunities = side_opportunities - target_observed
+                if new_opportunities:
+                    observations_to_go = len(target_possible - target_observed)
+                    target_table.loc[index, "SIDE Priority"] = 1 / observations_to_go
+             
 
 def calculate_overall_priority(pl: PriorityList) -> None:
     for table_list in pl.target_tables.values():
