@@ -58,10 +58,19 @@ def dataframe_to_datatable(
 
 def render_observing_pages(tl: tlc.TargetList, pl: pr.PriorityList, other_files: dict[str, str], dir: str = "html") -> str:
     # wipe out contents of dir
-    try:
-        shutil.rmtree(dir)
-    except FileNotFoundError:
-        pass  # don't care if directory didn't already exist
+    dir_cleared = False
+    fail_count = 0
+    while not dir_cleared:
+        try:
+            shutil.rmtree(dir)
+            dir_cleared = True
+        except FileNotFoundError:
+            break  # don't care if directory didn't already exist
+        except PermissionError as e:
+            # try again many times if permission error while removing directory (due to Dropbox file sync lock issue)
+            fail_count += 1
+            if fail_count > 50:
+                raise PermissionError(f"Tried {fail_count} times", e)
     pathlib.Path(f"{dir}/targets").mkdir(parents=True)
     if pl:
         pathlib.Path(f"{dir}/target scores").mkdir(parents=True)
@@ -142,9 +151,19 @@ def render_observing_pages(tl: tlc.TargetList, pl: pr.PriorityList, other_files:
             t = tags.table(border=border, cellpadding=padding)
             t.set_attribute("style", "text-align: center;")
             with t:
-                tags.tr(tags.th("Start UTC"), tags.th("Finish UTC"), tags.th("Moon Illumination"), tags.th(), tags.th())
+                columns = [
+                    tags.th("Start UTC"),
+                    tags.th("Finish UTC"),
+                    tags.th("Observing Hours"),
+                    tags.th("Moon Illumination"),
+                    tags.th("Priorities"),
+                    tags.th("Priorities"),
+                ]
+                for label in pl.category_labels[::-1]:
+                    columns.append(tags.th(f"Category: {label if label else "(None)"}"))
+                tags.tr(*columns)
                 first_iteration = True
-                for subsegments, illumination in zip(pl.segments, pl.moon_illumination):
+                for subsegments, illumination, members in zip(pl.segments, pl.moon_illumination, pl.segment_category_members):
                     beg = subsegments[0][0]
                     end = subsegments[-1][1]
                     if first_iteration:
@@ -160,14 +179,32 @@ def render_observing_pages(tl: tlc.TargetList, pl: pr.PriorityList, other_files:
                     end_cell = tags.td(end.iso[:19])
                     end_cell.add(tags.br())
                     end_cell.add(end.jd)
-                    tags.tr(
+                    columns = [
                         beg_cell,
                         end_cell,
+                        tags.td(f"{(end.jd - beg.jd) * 24:.1f}"),
                         tags.td(f"{illumination:.2f}"),
                         tags.td(tags.a("Numerical", href=f"Numerical Priorities {beg.iso[:10]}.html", id=numerical_id)),
                         tags.td(tags.a("Categorical", href=f"Categorical Priorities {beg.iso[:10]}.html", id=categorical_id)),
-                    )
+                    ]
+                    for label in pl.category_labels[::-1]:
+                        label_members = members[label]
+                        content = tags.span(len(label_members))
+                        content.set_attribute("title", ", ".join(label_members))
+                        columns.append(tags.td(content))
+                    tags.tr(*columns)
             d += t
+            # write list of members of each category
+            d += tags.h2("Category Members")
+            d += tags.p("Highest category attained by a target across entire observing session")
+            t = tags.table(border=border, cellpadding=padding)
+            with t:
+                tags.tr(tags.th("Category"), tags.th("Count"), tags.th("Members"))
+                for label in pl.category_labels[::-1]:
+                    members = pl.overall_category_members[label]
+                    tags.tr(tags.td(label if label else "(None)"), tags.td(len(members)), tags.td(", ".join(members)))
+            d += t
+        # write out summary page
         d += tags.script(util.raw(keybinding_script))
         with open(f"{dir}/index.html", "w") as f:
             f.write(d.render())
@@ -230,7 +267,7 @@ def render_observing_pages(tl: tlc.TargetList, pl: pr.PriorityList, other_files:
                     for val in pt[col]
                 ]
             # turn column headings into links to target score pages
-            all_targets = pt.columns.to_list() # save list of target names, in column order, before changing them into links
+            all_targets = pt.columns.to_list()  # save list of target names, in column order, before changing them into links
             pt.columns = [
                 (
                     f'<a href="target scores/Target Scores {target} {start_utc}.html", id="targets">{target}</a>'
@@ -274,12 +311,16 @@ def render_observing_pages(tl: tlc.TargetList, pl: pr.PriorityList, other_files:
                         )
                         d += tags.p(util.raw(dataframe_to_datatable(tt, "Target_Scores", table_options={"sort": False})))
                         if i > 0:
-                            d.head += tags.a("<-Prev Day", href=f"Target Scores {target} {start_times[i - 1]}.html", id="prevDay")
+                            d.head += tags.a(
+                                "<-Prev Day", href=f"Target Scores {target} {start_times[i - 1]}.html", id="prevDay"
+                            )
                         else:
                             d.head += tags.span("<-Prev Day")
                         d.head += horizontal_space
                         if i < len(start_times) - 1:
-                            d.head += tags.a("Next Day->", href=f"Target Scores {target} {start_times[i + 1]}.html", id="nextDay")
+                            d.head += tags.a(
+                                "Next Day->", href=f"Target Scores {target} {start_times[i + 1]}.html", id="nextDay"
+                            )
                         else:
                             d.head += tags.span("Next Day->")
                         d.head += horizontal_space
@@ -288,19 +329,27 @@ def render_observing_pages(tl: tlc.TargetList, pl: pr.PriorityList, other_files:
                             d.head += tags.span("<-Prev Target")
                         else:
                             d.head += tags.a(
-                                "<-Prev Target", href=f"Target Scores {all_targets[target_index - 1]} {start_utc}.html", id="prevTarget"
+                                "<-Prev Target",
+                                href=f"Target Scores {all_targets[target_index - 1]} {start_utc}.html",
+                                id="prevTarget",
                             )
                         d.head += horizontal_space
                         if target_index == len(all_targets) - 1:
                             d.head += tags.span("Next Target->")
                         else:
                             d.head += tags.a(
-                                "Next Target->", href=f"Target Scores {all_targets[target_index + 1]} {start_utc}.html", id="nextTarget"
+                                "Next Target->",
+                                href=f"Target Scores {all_targets[target_index + 1]} {start_utc}.html",
+                                id="nextTarget",
                             )
                         d.head += horizontal_space
-                        d.head += tags.a("Numerical Priorities", href=f"../Numerical Priorities {start_utc}.html", id="numerical")
+                        d.head += tags.a(
+                            "Numerical Priorities", href=f"../Numerical Priorities {start_utc}.html", id="numerical"
+                        )
                         d.head += horizontal_space
-                        d.head += tags.a("Categorical Priorities", href=f"../Categorical Priorities {start_utc}.html", id="categorical")
+                        d.head += tags.a(
+                            "Categorical Priorities", href=f"../Categorical Priorities {start_utc}.html", id="categorical"
+                        )
                         d.head += horizontal_space
                         d.head += tags.a("Summary Page", href="../index.html", id="summary")
                         d += tags.script(util.raw(keybinding_script))
@@ -328,7 +377,10 @@ def render_observing_pages(tl: tlc.TargetList, pl: pr.PriorityList, other_files:
             # add some helpful informational rows to the top of the chart
             ct.loc["RA"] = [segment_targets[segment_targets["Target Name"] == col]["RA"].values[0][:8] for col in ct.columns]
             ct.loc["Dec"] = [segment_targets[segment_targets["Target Name"] == col]["Dec"].values[0][:9] for col in ct.columns]
-            num_added_rows = 2
+            ct.loc["Vmag"] = [
+                f"{segment_targets[segment_targets["Target Name"] == col]["Vmag"].values[0]:.1f}" for col in ct.columns
+            ]
+            num_added_rows = 3
             if "PEPSI exp_time" in segment_targets.columns:
                 ct.loc["Teff"] = [
                     f"{segment_targets[segment_targets["Target Name"] == col]["Teff"].values[0]:.0f}" for col in ct.columns
@@ -337,6 +389,11 @@ def render_observing_pages(tl: tlc.TargetList, pl: pr.PriorityList, other_files:
             if "RV Standard" in segment_targets.columns:
                 ct.loc["RV Standard"] = [
                     segment_targets[segment_targets["Target Name"] == col]["RV Standard"].values[0] for col in ct.columns
+                ]
+                num_added_rows += 1
+            if "Num SIDE" in segment_targets.columns:
+                ct.loc["Num SIDE"] = [
+                    segment_targets[segment_targets["Target Name"] == col]["Num SIDE"].values[0] for col in ct.columns
                 ]
                 num_added_rows += 1
             new_ordering = [*ct.index[-num_added_rows:], *ct.index[:-num_added_rows]]
@@ -384,7 +441,6 @@ def render_observing_pages(tl: tlc.TargetList, pl: pr.PriorityList, other_files:
                 {"selector": "td", "props": [("padding", "10px"), ("border", "1px solid black"), ("text-align", "center")]}
             ]
             for other_table in other_tables:
-                d += tags.h2(f"{other_table} Entries")
                 ot = tl.other_lists[other_table]
                 ot = ot.sort_values(["Target Name"] + ot.columns[0:3].to_list())
                 if ot.index.name == "Target Name":
@@ -394,8 +450,12 @@ def render_observing_pages(tl: tlc.TargetList, pl: pr.PriorityList, other_files:
                         entries = pd.DataFrame()
                 else:
                     entries = ot[ot["Target Name"] == target_name].drop("Target Name", axis=1)
+                d += tags.h2(f"{other_table} Entries ({len(entries)})")
                 if not entries.empty:
                     d += util.raw(entries.style.hide(axis="index").set_table_styles(table_styles).to_html())
+                else:
+                    d += tags.span("(Empty Table)")
+
             d.head += horizontal_space
             d.head += tags.a("Summary Page", href="../index.html", id="summary")
             d += tags.script(util.raw(keybinding_script))
