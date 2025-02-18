@@ -84,13 +84,16 @@ class TargetListCreator:
         self.kwargs = kwargs.copy()
         self.steps = steps
 
-    def calculate(self, initial_df: TargetList = None, steps=None, verbose: bool = False, **kwargs) -> TargetList:
+    def calculate(self, initial_list: TargetList = None, steps=None, verbose: bool = False, **kwargs) -> TargetList:
         """
         Create a new target list by running through self.steps and returning the result
         """
-        if not initial_df:
-            initial_df = TargetList(name=self.name)
-        intermediate_tl = initial_df if initial_df else TargetList(name=self.name)
+        if not initial_list:
+            initial_list = TargetList(name=self.name)
+        else:
+            initial_list = initial_list.copy()
+            initial_list.name = self.name
+        intermediate_tl = initial_list if initial_list else TargetList(name=self.name)
         merged_kwargs = {**self.kwargs, **kwargs}
         if steps is None:
             steps = self.steps
