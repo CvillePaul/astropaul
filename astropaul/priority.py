@@ -18,12 +18,13 @@ class PriorityList:
         target_list: tlc.TargetList,
         session: tlc.ObservingSession,
         interval: u.Quantity = 1 * u.hour,
+        skip_partial: bool = True,
     ):
         self.target_list = target_list
         self.session = session
         self.interval = interval
         self.targets = target_list.target_list["Target Name"]  # TODO: remove hard coded column name
-        self.segments = session.calc_subsegments(interval)
+        self.segments = session.calc_subsegments(interval, skip_partial)
         self.moon_illumination = [
             np.average([ap.moon_illumination(segment[0][0]), ap.moon_illumination(segment[-1][1])]) for segment in self.segments
         ]
@@ -38,6 +39,8 @@ class PriorityList:
         self.categorical_priorities: list[pd.DataFrame] = None
         self.category_bins = None
         self.category_labels = None
+        self.segment_category_members = None
+        self.overall_category_members = None
 
     def categorize_priorities(self, bins: list[float] = None, labels: list[str] = None) -> None:
         if not bins or not labels:
@@ -49,11 +52,32 @@ class PriorityList:
         self.category_bins = bins
         self.category_labels = labels
         self.categorical_priorities = []
+        self.segment_category_members = []
+        self.overall_category_members = {label: set() for label in labels}
         for numerical_priority in self.numerical_priorities:
             category_table = numerical_priority.apply(
                 lambda col: pd.cut(col, bins=bins, labels=labels, ordered=False, include_lowest=True)
             )
             self.categorical_priorities.append(category_table)
+            segment_category_members = {label: set() for label in labels}
+            # tally targets by category
+            targets_already_seen = set()
+            for label in labels[::-1]:  # consider "highest" category first
+                targets_with_this_label = set()
+                for column in category_table.columns:
+                    if not (column in targets_already_seen) and category_table[column].eq(label).any():
+                        targets_with_this_label.add(column)
+                        targets_already_seen.add(column)
+                segment_category_members[label] = targets_with_this_label
+            self.segment_category_members.append(segment_category_members)
+        targets_already_seen = set()
+        for label in labels[::-1]:
+            all_with_this_label = set.union(
+                *[segment_category_members[label] for segment_category_members in self.segment_category_members]
+            )
+            all_with_this_label -= targets_already_seen
+            self.overall_category_members[label] = all_with_this_label
+            targets_already_seen |= all_with_this_label
 
 
 CategoryTable = list[tuple[tuple[Any, Any], Any]]
@@ -88,8 +112,13 @@ def calculate_moon_priority(
 
 
 def calculate_altitude_priority(
-    pl: PriorityList, altitude_categories: CategoryTable, min_nonzero_time: u.Quantity = 0 * u.hour
+    pl: PriorityList, altitude_categories: CategoryTable = None, min_nonzero_time: u.Quantity = 0 * u.hour
 ) -> None:
+    if not altitude_categories:
+        altitude_categories = [
+            ((-90, 30), 0),
+            ((30, 90), 1),
+        ]
     for _, row in pl.target_list.target_list.iterrows():
         target = row["Target Name"]
         coord = SkyCoord(ra=row["ra"], dec=row["dec"], unit=u.deg)
@@ -98,7 +127,7 @@ def calculate_altitude_priority(
             altitudes = pl.session.observer.altaz(times, coord).alt.value
             segment_table["Altitude Value"] = altitudes
             priorities = [pick_category(altitude_categories, altitude) for altitude in altitudes]
-            num_nonzero = len(list(filter(lambda x: x > 0, priorities)))
+            num_nonzero = len(list(filter(lambda x: x and x > 0, priorities)))
             if pl.interval * num_nonzero > min_nonzero_time:
                 segment_table["Altitude Priority"] = priorities
             else:
@@ -328,11 +357,12 @@ def prioritize_side_observation(pl: PriorityList, side_phases: list[str], eclips
     # define what kind of eclipses we care about, eg: any A, or Aa specifically, etc.
     def calc_eclipse_type(row):
         return row["System"]  # + row["Member"]
+
     # split a comma-separated list of prior observations into a set of eclipse types
     def parse_side_opportunities(opportunities):
         answer = set()
         for opportunity in opportunities.split(", "):
-            answer.add(opportunity[0:1]) # only take System portion of eclipse type
+            answer.add(opportunity[0:1])  # only take System portion of eclipse type
         return answer
 
     # for each target, build a set of all possible eclipses: dict[target, set[eclipse_type]]
@@ -380,7 +410,7 @@ def prioritize_side_observation(pl: PriorityList, side_phases: list[str], eclips
                 if new_opportunities:
                     observations_to_go = len(target_possible - target_observed)
                     target_table.loc[index, "SIDE Priority"] = 1 / observations_to_go
-             
+
 
 def calculate_overall_priority(pl: PriorityList) -> None:
     for table_list in pl.target_tables.values():
