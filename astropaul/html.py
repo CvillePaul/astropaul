@@ -251,21 +251,30 @@ def render_observing_pages(tl: tlc.TargetList, pl: pr.PriorityList, other_files:
     # make pages for numerical priorities
     if pl and pl.numerical_priorities:
         start_times = [f"{pt.index[0]:%Y-%m-%d}" for pt in pl.numerical_priorities]
+        threshold = pl.category_bins[-2]
+        above_threshold_style = "background-color: #EBF4FA;"
+        not_observable_style = "color: #DDDDDD;"
         for i, priority_table in enumerate(pl.numerical_priorities):
             pt = priority_table.copy()
             start_utc = start_times[i]
             pt.index = [f"{time:%H:%M}" for time in pt.index]
             # apply background highlighting to cells above threshold
-            threshold = pl.category_bins[-2]
             for col in pt.columns:
-                pt[col] = [
-                    (
-                        0
-                        if val == 0
-                        else f"{val:.3f}" if val < threshold else f'<span style="background-color: #EBF4FA">{val:.3f}</span>'
-                    )
-                    for val in pt[col]
-                ]
+                target_scores = pl.target_tables[col][i]
+                if "Altitude Priority" in target_scores.columns:
+                    altitudes = target_scores["Altitude Priority"].values
+                else:
+                    altitudes = [1] * len(target_scores)
+                styled_scores = []
+                for score, altitude in zip(pt[col], altitudes):
+                    style = "text-align: center;"
+                    precision = 0 if score == 0 else 3
+                    if score > threshold:
+                        style += above_threshold_style
+                    if altitude == 0:
+                        style += not_observable_style
+                    styled_scores.append(f'<span style="{style}">{score:.{precision}f}</span>')
+                pt[col] = styled_scores
             # turn column headings into links to target score pages
             all_targets = pt.columns.to_list()  # save list of target names, in column order, before changing them into links
             pt.columns = [
