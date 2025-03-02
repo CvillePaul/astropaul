@@ -168,9 +168,9 @@ def add_speckle(tl: TargetList, column_prefix="Speckle ", **kwargs) -> TargetLis
     return answer
 
 
-def add_pepsi(tl: TargetList, column_prefix="PEPSI ", **kwargs) -> TargetList:
+def add_pepsi(tl: TargetList, **kwargs) -> TargetList:
     # first, add a column for total observations to main table
-    count_column = f"Num {column_prefix.replace(" ", "")}"
+    count_column = "Num PEPSI"
     spectra_count = pd.read_sql(
         f"""
         select target_id, count(id) as '{count_column}'
@@ -184,7 +184,15 @@ def add_pepsi(tl: TargetList, column_prefix="PEPSI ", **kwargs) -> TargetList:
     # next, add a separate table of all spectra
     spectra = pd.read_sql(
         """
-        select t.name 'Target Name', srd.*
+        select 
+            t.name 'Target Name', 
+            srd.id 'PEPSI ID', 
+            srd.fiber Fiber, 
+            srd.arm Arm, 
+            srd.cross_disperser 'Cross Disperser', 
+            srd.uri 'File Name', 
+            srd.datetime_utc 'Start UTC', 
+            srd.exposure_time 'Exposure Time'
         from tom_spectrumrawdata as srd
         join tom_target as t on t.id = srd.target_id
         """,
@@ -193,8 +201,7 @@ def add_pepsi(tl: TargetList, column_prefix="PEPSI ", **kwargs) -> TargetList:
     )
     existing_targets = tl.target_list["Target Name"].to_list()
     spectra = spectra[spectra.index.isin(existing_targets)]
-    new_column_names = {column: f"{column_prefix}{column.capitalize()}" for column in spectra.columns}
-    spectra.rename(columns=new_column_names, inplace=True)
+    spectra["Start JD"] = [Time(utc_time, format="iso").jd for utc_time in spectra["Start UTC"].values]
     answer = TargetList.merge(tl, spectra_count, column_groups, {"PEPSI": spectra})
     answer.target_list[count_column] = answer.target_list[count_column].fillna(int(0))
     return answer
@@ -239,8 +246,9 @@ def add_ephemerides(tl: TargetList, **kwargs) -> TargetList:
     )
     existing_targets = tl.target_list["Target Name"]
     ephem = ephem[ephem.index.isin(existing_targets)]
-    ephem["period"] = ephem["period"] / 3600 / 24  # convert from seconds to days for convenience
-    ephem["duration"] = ephem["duration"] / 3600 / 24  # convert from seconds to days for convenience
+    ephem["period"] = ephem["period"] / 3600 / 24  # convert from seconds to days
+    ephem["duration"] = ephem["duration"] / 3600 / 24  # convert from seconds to days
+    ephem["Duration (Hours)"] = [f"{duration * 24:.1f}" for duration in ephem["duration"]]  # also convert duration to hours
     new_column_names = {column: column.capitalize() for column in ephem.columns}
     ephem.rename(columns=new_column_names, inplace=True)
     answer = tl.copy()
@@ -266,7 +274,7 @@ def add_phase_events(
         for target_name, ephem_list in ephems.items():
             for ephem in ephem_list:
                 event_list = ph.PhaseEventList.calc_phase_events(ephem, phase_event_defs, beg.jd, end.jd).events
-                event_list[0].jd = beg.jd # treat first event as if it had started at segment beginning
+                event_list[0].jd = beg.jd  # treat first event as if it had started at segment beginning
                 # set end time equal to begin time of next event, or if last event to segment end
                 num_events = len(event_list)
                 end_jds = [0.0] * num_events
@@ -282,9 +290,7 @@ def add_phase_events(
                 # populate table with all values except end times
                 for event, end_jd, end_utc in zip(event_list, end_jds, end_utcs):
                     phase_events.loc[len(phase_events)] = (
-                        [target_name]
-                        + event.to_list()
-                        + [end_jd, Time(event.jd, format="jd").iso[:19], end_utc]
+                        [target_name] + event.to_list() + [end_jd, Time(event.jd, format="jd").iso[:19], end_utc]
                     )
     answer.other_lists["Phase Events"] = phase_events
     return answer
@@ -473,11 +479,56 @@ def add_speckle_phase(tl: TargetList, phase_event_defs: list[ph.PhaseEventDef], 
                 target_name,
                 int(speckle["Speckle Session"]),
                 speckle["Speckle Mid"],
-                Time(speckle["Speckle Mid"], format="jd").iso[:18],
+                Time(speckle["Speckle Mid"], format="jd").iso[:19],
                 ephem_row["System"],
                 ephem_row["Member"],
                 state,
             ]
     if not speckle_phases.empty:
         answer.other_lists["Speckle Phases"] = speckle_phases
+    return answer
+
+
+def add_rv_status(tl: TargetList, phase_event_defs: list[ph.PhaseEventDef], **kwargs) -> TargetList:
+    """Calculate what PhaseEventDef was most in effect during a PEPSI spectrum.
+    The status of each system is determined by the status of its first component with non-nan ephemeris values.
+    These system statuses are then concatenated, separated by '|' characters, to get the final status for the target.
+    """
+    required_tables = {"PEPSI", "Ephem"}
+    existing_tables = set(tl.other_lists.keys())
+    if not existing_tables.issuperset(required_tables):
+        raise ValueError(f"One or more required table missing: {', '.join(required_tables - existing_tables)}")
+    answer = tl.copy()
+    ephem_table = tl.other_lists["Ephem"]
+    pepsi_phases = pd.DataFrame(columns=["Target Name", "PEPSI ID", "Start JD", "Start UTC", "State"])
+    for target_name, pepsi in tl.other_lists["PEPSI"].iterrows():
+        ephem_rows = ephem_table[ephem_table.index == target_name]
+        if ephem_rows.empty:
+            continue
+        beg = pepsi["Start JD"]
+        end = beg + pepsi["Exposure Time"] / 24 / 3600  # exposure time is in seconds instead of days
+        system_states = []
+        for _, system_ephems in ephem_rows.groupby("System"):
+            system_state = None
+            for _, component_ephem in system_ephems.iterrows():
+                ephem = ph.Ephemeris.from_dataframe_row(component_ephem)
+                if ephem.t0 == ephem.t0 and ephem.period == ephem.period and ephem.duration == ephem.duration:
+                    system_state = ph.PhaseEventList.calc_phase_events(ephem, phase_event_defs, beg, end).calc_longest_span(
+                        beg, end
+                    )
+                    break
+            if system_state:
+                system_states.append(system_state)
+            else:
+                system_states.append("?")
+            
+        pepsi_phases.loc[len(pepsi_phases)] = [
+            target_name,
+            int(pepsi["PEPSI ID"]),
+            pepsi["Start JD"],
+            pepsi["Start UTC"][:18],
+            "|".join(system_states),
+        ]
+    if not pepsi_phases.empty:
+        answer.other_lists["PEPSI RV Status"] = pepsi_phases
     return answer
