@@ -4,6 +4,7 @@ import astropaul.observing as obs
 from astropaul.targetlistcreator import TargetList
 from .exposure_time import pepsi_exptime
 
+
 def add_pepsi_params(
     tl: TargetList,
     fiber: str,
@@ -24,11 +25,13 @@ def add_pepsi_params(
     answer.target_list[f"{column_prefix}cd_red_num_exp"] = 1
     answer.target_list[f"{column_prefix}snr"] = snr
     answer.target_list[f"{column_prefix}exp_time"] = [
-        round(max(
-            (times := pepsi_exptime(vmag, snr, teff=teff, fiber_setup=fiber, binocular=binocular))[cd_red - 1],
-            times[cd_blue - 1],
-            60,  # never recommend exposures under 1 minute
-        ))
+        round(
+            max(
+                (times := pepsi_exptime(vmag, snr, teff=teff, fiber_setup=fiber, binocular=binocular))[cd_red - 1],
+                times[cd_blue - 1],
+                60,  # never recommend exposures under 1 minute
+            )
+        )
         for vmag, teff in answer.target_list[["Vmag", "Teff"]].values
     ]
     answer.target_list[f"{column_prefix}priority"] = priority
@@ -39,21 +42,28 @@ def add_pepsi_params(
     return answer
 
 
-def assign_rv_standards(tl: TargetList, science_types: list[str], rv_standard_type: str = "RV Standard", **kwargs) -> pd.DataFrame:
+def assign_rv_standards(
+    tl: TargetList, science_types: list[str], rv_standard_type: str = "RV Standard", **kwargs
+) -> pd.DataFrame:
     answer = tl.copy()
     rv_standards = answer.target_list[answer.target_list["Target Type"] == rv_standard_type]
-    science_targets = answer.target_list[answer.target_list["Target Type"].isin(science_types)]
+    targets = answer.target_list
+    # science_targets = answer.target_list[answer.target_list["Target Type"].isin(science_types)]
 
     def find_standard(value: float, standards: pd.DataFrame) -> int:
-        closest_idx = (standards['Teff'] - value).abs().idxmin()
+        closest_idx = (standards["Teff"] - value).abs().idxmin()
         if closest_idx == closest_idx:
-            return standards.iloc[closest_idx]["Target Name"]
+            return standards.loc[closest_idx, "Target Name"]
         else:
             return ""
 
-    science_targets["RV Standard"] = science_targets["Teff"].apply(find_standard, standards=rv_standards)
-    answer.target_list = answer.target_list.merge(science_targets[["Teff", "RV Standard"]], on="Teff", how="left")
-    answer.target_list["RV Standard"].fillna("", inplace=True)
+    targets["RV Standard"] = [
+        find_standard(teff, standards=rv_standards) if type in science_types else ""
+        for teff, type in targets[["Teff", "Target Type"]].values
+    ]
+    # science_targets["Teff"].apply(find_standard, standards=rv_standards)
+    # answer.target_list = answer.target_list.merge(science_targets[["Teff", "RV Standard"]], on="Teff", how="left")
+    # answer.target_list["RV Standard"].fillna("", inplace=True)
     return answer
 
 
