@@ -121,7 +121,7 @@ def render_observing_pages(tl: tlc.TargetList, pl: pr.PriorityList, other_files:
         d += tags.br()
         # output information about the targets
         d += tags.h2(
-            f"Target List ({len(tl.target_list)} targets)", tags.a("View target table", href=f"{tl.name}.html", id="targets")
+            f"Target List ({len(tl.target_list)} targets)", tags.a("View target table", href=f"{tl.name} Target List.html", id="targets")
         )
         target_types = collections.Counter(tl.target_list["Target Type"])
         t = tags.table(border=border, cellpadding=padding)
@@ -206,13 +206,18 @@ def render_observing_pages(tl: tlc.TargetList, pl: pr.PriorityList, other_files:
             d += t
         # write out summary page
         d += tags.script(util.raw(keybinding_script))
+        d.footer += tags.p(
+            f"Created {datetime.now().astimezone().isoformat(sep=" ", timespec="seconds")} on {platform.node()}",
+            style="text-align: left; font-style: italic;",
+        )
+        
         with open(f"{dir}/index.html", "w") as f:
             f.write(d.render())
 
     # make page for target list
     tltl = tl.target_list.copy()
     tltl["Target Name"] = [f'<a href="targets/{target_name}.html">{target_name}</a>' for target_name in tltl["Target Name"]]
-    title = tl.name
+    title = f"{tl.name} Target List"
     with dominate.document(title=title) as d:
         d.head += tags.a("Summary Page", href="index.html", id="summary")
         d += tags.h1(title, style="text-align: center")
@@ -436,7 +441,7 @@ def render_observing_pages(tl: tlc.TargetList, pl: pr.PriorityList, other_files:
     for _, row in tl.target_list.iterrows():
         target_name = row["Target Name"]
         with dominate.document(title=target_name) as d:
-            d += tags.h1(target_name, style="text-align: center")
+            d += tags.h1(f"{target_name} Target Details", style="text-align: center")
             with tags.table(border=border, cellpadding=padding) as t:
                 tags.tr([tags.th(item) for item in columns])
                 tags.tr([tags.td(value) for value in row[columns]])
@@ -474,3 +479,26 @@ def render_observing_pages(tl: tlc.TargetList, pl: pr.PriorityList, other_files:
             )
             with open(f"{dir}/targets/{target_name}.html", "w") as f:
                 f.write(d.render())
+
+from playwright.sync_api import sync_playwright
+def html_to_pdf(input_html_path, output_pdf_path):
+    with open(input_html_path, 'r') as f:
+      html_content = f.read()
+    beg = html_content.find("<head>")
+    end = html_content.find("</head>")
+    if beg > 0 and end > 0 and end > beg:
+        html_content = html_content[0:beg] + html_content[end + 7:]
+    with sync_playwright() as p:
+        browser = p.chromium.launch()
+        page = browser.new_page()
+        page.set_content(html_content)
+        page.evaluate('''
+            const table = document.querySelector('table.dataTable'); 
+            if (table) {
+                table.style.width = 'auto';
+                table.style.maxWidth = '100%'; 
+                table.style.fontSize = 'smaller';
+            }
+        ''')
+        page.pdf(path=output_pdf_path, format="Letter", landscape=True, print_background=True,)
+        browser.close()
