@@ -252,7 +252,7 @@ def calculate_phase_priority(pl: PriorityList, phase_defs: list[ph.PhaseEventDef
     min_priority = min(phase_categories, key=operator.itemgetter(1))
     for target, table_list in pl.target_tables.items():
         ephem_rows = ephem_table.loc[target]
-        ephem_rows = ephem_rows[ephem_rows["Ephem Member"] == "a"]
+        ephem_rows = ephem_rows[ephem_rows["Member"] == "a"]
         if ephem_rows.empty or len(ephem_rows) < 2:
             # flunk anything that doesn't have at least two binaries
             for table in table_list:
@@ -267,7 +267,7 @@ def calculate_phase_priority(pl: PriorityList, phase_defs: list[ph.PhaseEventDef
                 states = [event_list.calc_longest_span(segment_beg.jd, segment_end.jd) for segment_beg, segment_end in segments]
                 table[f"Phase System {ephem.system} State"] = states
         # make the overall priority column that considers all available systems
-        system_cols = [f"Phase System {system} State" for system in ephem_rows["Ephem System"]]
+        system_cols = [f"Phase System {system} State" for system in ephem_rows["System"]]
         for table in table_list:
             overall_priorities = []
             for _, row in table.iterrows():
