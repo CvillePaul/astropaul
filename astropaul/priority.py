@@ -248,7 +248,7 @@ def calculate_eclipse_priority(
 
 
 def calculate_phase_priority(pl: PriorityList, phase_defs: list[ph.PhaseEventDef], phase_categories: dict[str, float]) -> None:
-    ephem_table = pl.target_list.other_lists["Ephem"]
+    ephem_table = pl.target_list.other_lists["Ephemerides"]
     min_priority = min(phase_categories, key=operator.itemgetter(1))
     for target, table_list in pl.target_tables.items():
         ephem_rows = ephem_table.loc[target]
@@ -340,15 +340,21 @@ def prioritize_phase_sequence(
                     target_table.loc[rows, priority_column] = 0.0
 
 
-def prioritize_side_observation(pl: PriorityList, side_phases: list[str], eclipse_column: str = "Eclipse") -> None:
-    """Look through the history of speckle measurements of a target, noting all that captured targets in the desired phase(s).
-    Prioritize targets that undergo an eclipse of a new system and/or member during an observing segment.
-    Partially prioritize targets that undergo an eclipse already captured by previous speckle observation(s).
-    For each previous observation, subtract `repeat_penalty` from the score for that eclipse event"""
+def prioritize_side_observation(pl: PriorityList, side_state: str = "Eclipse", system_only: bool = True) -> None:
+    """Prioritize opportunities to add new SIDE observations of a target.
+    A requirement is that there is already a priority column with name "`side_state` Sequence" that identifies eclipses.
+    `system_only` determines the definition of an opportunity.
+    If True, all eclipses of a given system (eg, Aa, Ab, etc.) are considered equivalent.
+    If False, each system+member combination is considered unique.
+    The priority is calculated as 1 over the number of remaining unobserved opportunities for that target.
+    Examples:
+      A quad binary with an A eclipse already observed and an opportunity to observe a B eclipse: priority = 1.0.
+      A sextuple with one system observed and an opportunity to observe another system: priority = 0.5.
+      A quad with Aa observed, an opportunity to observe Ba and `system_only` False: priority = 0.33."""
+
     required_tables = {
-        "Ephem",
-        "Speckle Phases",
-        "Phase Events",
+        "Ephemerides",
+        "SIDE Observations",
     }
     existing_tables = set(pl.target_list.other_lists.keys())
     if not existing_tables.issuperset(required_tables):
@@ -356,38 +362,37 @@ def prioritize_side_observation(pl: PriorityList, side_phases: list[str], eclips
 
     # define what kind of eclipses we care about, eg: any A, or Aa specifically, etc.
     def calc_eclipse_type(row):
-        return row["System"]  # + row["Member"]
+        if system_only:
+            return row["System"]
+        else:
+            return row["System"] + row["Member"]
 
     # split a comma-separated list of prior observations into a set of eclipse types
     def parse_side_opportunities(opportunities):
         answer = set()
         for opportunity in opportunities.split(", "):
-            answer.add(opportunity[0:1])  # only take System portion of eclipse type
+            if system_only:
+                answer.add(opportunity[0:1])
+            else:
+                answer.add(opportunity)
         return answer
 
     # for each target, build a set of all possible eclipses: dict[target, set[eclipse_type]]
     possible_eclipses = {}
-    for target_name, row in pl.target_list.other_lists["Ephem"].iterrows():
+    for target_name, row in pl.target_list.other_lists["Ephemerides"].iterrows():
         eclipse_type = calc_eclipse_type(row)
-        target_possible = possible_eclipses.get(target_name, set())
-        target_possible.add(eclipse_type)
-        possible_eclipses[target_name] = target_possible
+        target_possibilities = possible_eclipses.get(target_name, set())
+        target_possibilities.add(eclipse_type)
+        possible_eclipses[target_name] = target_possibilities
 
     # build a dictionary that lists all eclipse types already observed in prior speckle sessions: dict[target, set[eclipse_type]]
     prior_observations = {}
-    speckle_phases = pl.target_list.other_lists["Speckle Phases"]
-    for _, row in speckle_phases.iterrows():
-        if not row["State"] in side_phases:
-            continue
+    for _, row in pl.target_list.other_lists["SIDE Observations"].iterrows():
         target_name = row["Target Name"]
         eclipse_type = calc_eclipse_type(row)
         target_observed = prior_observations.get(target_name, set())
         target_observed.add(eclipse_type)
         prior_observations[target_name] = target_observed
-
-    # add a column to the target list table indicating number of prior SIDE observations
-    tl = pl.target_list.target_list
-    tl["Num SIDE"] = [len(prior_observations.get(target_name, set())) for target_name in tl["Target Name"]]
 
     # add an empty SIDE Priority column to every priority table
     for target_tables in pl.target_tables.values():
@@ -398,17 +403,17 @@ def prioritize_side_observation(pl: PriorityList, side_phases: list[str], eclips
     # for each eclipse during an observing segment, prioritize it if it's a new eclipse type
     for target_name, target_tables in pl.target_tables.items():
         target_observed = prior_observations.get(target_name, set())
-        target_possible = possible_eclipses[target_name]
+        target_possibilities = possible_eclipses[target_name]
         for target_table in target_tables:
             for index, row in target_table.iterrows():
-                opportunities_string = row[f"{eclipse_column} Sequence"]
+                opportunities_string = row[f"{side_state} Sequence"]
                 if not opportunities_string:
                     continue
                 target_table.loc[index, "Prior SIDE Observations"] = ", ".join(target_observed)
                 side_opportunities = parse_side_opportunities(opportunities_string)
                 new_opportunities = side_opportunities - target_observed
                 if new_opportunities:
-                    observations_to_go = len(target_possible - target_observed)
+                    observations_to_go = len(target_possibilities - target_observed)
                     target_table.loc[index, "SIDE Priority"] = 1 / observations_to_go
 
 
