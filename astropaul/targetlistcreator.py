@@ -1,4 +1,5 @@
 import collections
+import inspect
 from typing import Any
 
 import astroplan as ap
@@ -17,11 +18,13 @@ class TargetList:
         self,
         name: str = "Target List",
         target_list: pd.DataFrame = None,
+        list_criteria: list[str] = None,
         column_groups: dict[str, tuple[list[str], list[str]]] = None,
         other_lists: dict[str, pd.DataFrame] = {},
     ):
         self.name = name
         self.target_list = target_list if target_list is not None else pd.DataFrame()
+        self.list_criteria = list_criteria or []
         self.column_groups = column_groups or collections.defaultdict(list)
         self.other_lists = other_lists
 
@@ -29,6 +32,7 @@ class TargetList:
         answer = TargetList(
             name=self.name,
             target_list=self.target_list.copy(),
+            list_criteria=self.list_criteria.copy(),
             column_groups=self.column_groups.copy(),
             other_lists={key: value.copy() for key, value in self.other_lists.items()},
         )
@@ -42,6 +46,12 @@ class TargetList:
 
     def summarize(self) -> str:
         answer = f"{self.name}\n"
+        answer += "Criteria\n"
+        if len(self.list_criteria) > 0:
+            for criterion in self.list_criteria:
+                answer += f"    {criterion}\n"
+        else:
+            answer += "    (none)"
         target_types = collections.Counter(self.target_list["Target Type"])
         answer += f"{len(self.target_list)} targets:\n"
         for type, count in target_types.items():
@@ -376,6 +386,9 @@ def add_observability(
 
     # calculate observability for each time segment of the observing session
     answer = tl.copy()
+    answer.list_criteria.append(f"Observability threshold: {observability_threshold}")
+    for constraint in constraints:
+        answer.list_criteria.append(f"{constraint.__class__.__name__}: {vars(constraint)}")
     overall_any_night = np.array([False] * len(answer.target_list))
     overall_every_night = np.array([True] * len(answer.target_list))
     overall_max_alts = np.array([-90.0] * len(answer.target_list))
@@ -446,11 +459,19 @@ def add_observability(
 
 def filter_targets(
     tl: TargetList,
-    criteria=True,
+    *,
+    criteria,
     inverse: bool = False,
     **kwargs,
 ) -> TargetList:
     answer = tl.copy()
+    code = inspect.getsource(criteria).strip()
+    prefix = code.find("criteria=")
+    if prefix > 0:
+        prefix += 9
+    else:
+        prefix = 0
+    answer.list_criteria.append(code[prefix:])
     if inverse:
         answer.target_list = answer.target_list[~criteria(answer.target_list)]
     else:
@@ -519,10 +540,8 @@ def add_side_status(
                     ephem_row["Member"],
                 ]
     if not side_observations.empty:
-        answer.other_lists["SIDE Observations"] = side_observations.sort_values(
-            ["Target Name", "System", "Member", "JD Mid"]
-        )
-        side_counts = side_observations.groupby("Target Name").size()#.reset_index("Target Name")
+        answer.other_lists["SIDE Observations"] = side_observations.sort_values(["Target Name", "System", "Member", "JD Mid"])
+        side_counts = side_observations.groupby("Target Name").size()
         side_counts.name = "Num SIDE"
         answer.target_list = answer.target_list.merge(side_counts, on="Target Name", how="left")
         answer.target_list["Num SIDE"] = answer.target_list["Num SIDE"].fillna(0).astype(int)
