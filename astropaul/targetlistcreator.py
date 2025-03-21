@@ -164,7 +164,7 @@ def add_speckle(tl: TargetList, column_prefix="Speckle ", **kwargs) -> TargetLis
     speckle.rename(columns=new_column_names, inplace=True)
     speckle[f"{column_prefix}Mid UTC"] = Time(speckle[f"{column_prefix}Mid"], format="jd").iso
     answer = TargetList.merge(tl, num_speckle, column_groups, {"Speckle": speckle})
-    answer.target_list[count_column] = answer.target_list[count_column].fillna(int(0))
+    answer.target_list[count_column] = answer.target_list[count_column].fillna(0).astype(int)
     return answer
 
 
@@ -489,6 +489,46 @@ def add_speckle_phase(tl: TargetList, phase_event_defs: list[ph.PhaseEventDef], 
     return answer
 
 
+def add_side_status(
+    tl: TargetList, phase_event_defs: list[ph.PhaseEventDef], side_state: str = "Eclipse", **kwargs
+) -> TargetList:
+    """Examine all speckle observations and determine which ones occurred during eclipse.
+    `side_state` specifies the name returned by one or more `phase_event_defs` that indicate an eclipse."""
+    required_tables = {"Ephem", "Speckle"}
+    existing_tables = set(tl.other_lists.keys())
+    if not existing_tables.issuperset(required_tables):
+        raise ValueError(f"One or more required table missing: {', '.join(required_tables - existing_tables)}")
+    answer = tl.copy()
+    ephem_table = tl.other_lists["Ephem"]
+    side_observations = pd.DataFrame(columns=["Target Name", "Speckle Session", "JD Mid", "UTC Mid", "System", "Member"])
+    for target_name, speckle in tl.other_lists["Speckle"].iterrows():
+        ephem_rows = ephem_table[ephem_table.index == target_name]
+        if ephem_rows.empty:
+            continue
+        beg, end = speckle["Speckle Start"], speckle["Speckle End"]
+        for _, ephem_row in ephem_rows.sort_values(["System", "Member"]).iterrows():
+            ephem = ph.Ephemeris.from_dataframe_row(ephem_row)
+            state = ph.PhaseEventList.calc_phase_events(ephem, phase_event_defs, beg, end).calc_longest_span(beg, end)
+            if state == side_state:
+                side_observations.loc[len(side_observations)] = [
+                    target_name,
+                    int(speckle["Speckle Session"]),
+                    speckle["Speckle Mid"],
+                    Time(speckle["Speckle Mid"], format="jd").iso[:19],
+                    ephem_row["System"],
+                    ephem_row["Member"],
+                ]
+    if not side_observations.empty:
+        answer.other_lists["SIDE Observations"] = side_observations.sort_values(
+            ["Target Name", "System", "Member", "JD Mid"]
+        )
+        side_counts = side_observations.groupby("Target Name").size()#.reset_index("Target Name")
+        side_counts.name = "Num SIDE"
+        answer.target_list = answer.target_list.merge(side_counts, on="Target Name", how="left")
+        answer.target_list["Num SIDE"] = answer.target_list["Num SIDE"].fillna(0).astype(int)
+    return answer
+
+
 def add_rv_status(tl: TargetList, phase_event_defs: list[ph.PhaseEventDef], **kwargs) -> TargetList:
     """Calculate what PhaseEventDef was most in effect during a PEPSI spectrum.
     The status of each system is determined by the status of its first component with non-nan ephemeris values.
@@ -521,7 +561,7 @@ def add_rv_status(tl: TargetList, phase_event_defs: list[ph.PhaseEventDef], **kw
                 system_states.append(system_state)
             else:
                 system_states.append("?")
-            
+
         pepsi_phases.loc[len(pepsi_phases)] = [
             target_name,
             int(pepsi["PEPSI ID"]),
