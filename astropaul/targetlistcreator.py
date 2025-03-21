@@ -163,7 +163,7 @@ def add_speckle(tl: TargetList, column_prefix="Speckle ", **kwargs) -> TargetLis
     new_column_names = {column: f"{column_prefix}{column.capitalize()}" for column in speckle.columns}
     speckle.rename(columns=new_column_names, inplace=True)
     speckle[f"{column_prefix}Mid UTC"] = Time(speckle[f"{column_prefix}Mid"], format="jd").iso
-    answer = TargetList.merge(tl, num_speckle, column_groups, {"Speckle": speckle})
+    answer = TargetList.merge(tl, num_speckle, column_groups, {"Speckle Observations": speckle})
     answer.target_list[count_column] = answer.target_list[count_column].fillna(0).astype(int)
     return answer
 
@@ -252,7 +252,7 @@ def add_ephemerides(tl: TargetList, **kwargs) -> TargetList:
     new_column_names = {column: column.capitalize() for column in ephem.columns}
     ephem.rename(columns=new_column_names, inplace=True)
     answer = tl.copy()
-    answer.add_other("Ephem", ephem)
+    answer.add_other("Ephemerides", ephem)
     return answer
 
 
@@ -260,7 +260,7 @@ def add_phase_events(
     tl: TargetList, observing_session: ObservingSession, phase_event_defs: list[ph.PhaseEventDef], **kwargs
 ) -> TargetList:
     """Calculate what phase events are in effect for each observing segment"""
-    if (ephem_table := tl.other_lists.get("Ephem", pd.DataFrame())).empty:
+    if (ephem_table := tl.other_lists.get("Ephemerides", pd.DataFrame())).empty:
         raise ValueError("Ephem table not present")
     answer = tl.copy()
     ephems = {}
@@ -460,14 +460,14 @@ def filter_targets(
 
 def add_speckle_phase(tl: TargetList, phase_event_defs: list[ph.PhaseEventDef], **kwargs) -> TargetList:
     """Calculate what PhaseEventDef was most in effect during a speckle observation"""
-    required_tables = {"Speckle", "Ephem"}
+    required_tables = {"Speckle Observations", "Ephemerides"}
     existing_tables = set(tl.other_lists.keys())
     if not existing_tables.issuperset(required_tables):
         raise ValueError(f"One or more required table missing: {', '.join(required_tables - existing_tables)}")
     answer = tl.copy()
-    ephem_table = tl.other_lists["Ephem"]
+    ephem_table = tl.other_lists["Ephemerides"]
     speckle_phases = pd.DataFrame(columns=["Target Name", "Speckle Session", "JD Mid", "UTC Mid", "System", "Member", "State"])
-    for target_name, speckle in tl.other_lists["Speckle"].iterrows():
+    for target_name, speckle in tl.other_lists["Speckle Observations"].iterrows():
         ephem_rows = ephem_table[ephem_table.index == target_name]
         if ephem_rows.empty:
             continue
@@ -494,14 +494,14 @@ def add_side_status(
 ) -> TargetList:
     """Examine all speckle observations and determine which ones occurred during eclipse.
     `side_state` specifies the name returned by one or more `phase_event_defs` that indicate an eclipse."""
-    required_tables = {"Ephem", "Speckle"}
+    required_tables = {"Ephemerides", "Speckle Observations"}
     existing_tables = set(tl.other_lists.keys())
     if not existing_tables.issuperset(required_tables):
         raise ValueError(f"One or more required table missing: {', '.join(required_tables - existing_tables)}")
     answer = tl.copy()
-    ephem_table = tl.other_lists["Ephem"]
+    ephem_table = tl.other_lists["Ephemerides"]
     side_observations = pd.DataFrame(columns=["Target Name", "Speckle Session", "JD Mid", "UTC Mid", "System", "Member"])
-    for target_name, speckle in tl.other_lists["Speckle"].iterrows():
+    for target_name, speckle in tl.other_lists["Speckle Observations"].iterrows():
         ephem_rows = ephem_table[ephem_table.index == target_name]
         if ephem_rows.empty:
             continue
@@ -534,12 +534,12 @@ def add_rv_status(tl: TargetList, phase_event_defs: list[ph.PhaseEventDef], **kw
     The status of each system is determined by the status of its first component with non-nan ephemeris values.
     These system statuses are then concatenated, separated by '|' characters, to get the final status for the target.
     """
-    required_tables = {"PEPSI", "Ephem"}
+    required_tables = {"PEPSI", "Ephemerides"}
     existing_tables = set(tl.other_lists.keys())
     if not existing_tables.issuperset(required_tables):
         raise ValueError(f"One or more required table missing: {', '.join(required_tables - existing_tables)}")
     answer = tl.copy()
-    ephem_table = tl.other_lists["Ephem"]
+    ephem_table = tl.other_lists["Ephemerides"]
     pepsi_phases = pd.DataFrame(columns=["Target Name", "PEPSI ID", "Start JD", "Start UTC", "State"])
     for target_name, pepsi in tl.other_lists["PEPSI"].iterrows():
         ephem_rows = ephem_table[ephem_table.index == target_name]
