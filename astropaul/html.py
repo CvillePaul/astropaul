@@ -464,7 +464,7 @@ def render_observing_pages(tl: tlc.TargetList, pl: pr.PriorityList, other_files:
                         entries = pd.DataFrame()
                 else:
                     entries = ot[ot["Target Name"] == target_name].drop("Target Name", axis=1)
-                d += tags.h2(f"{other_table} Entries ({len(entries)})")
+                d += tags.h2(f"{other_table} ({len(entries)})")
                 if not entries.empty:
                     d += util.raw(entries.style.hide(axis="index").set_table_styles(table_styles).to_html())
                 else:
