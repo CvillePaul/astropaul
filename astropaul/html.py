@@ -133,6 +133,13 @@ def render_observing_pages(tl: tlc.TargetList, pl: pr.PriorityList, other_files:
                 )
         d += t
         d += tags.br()
+        if tl.list_criteria and len(tl.list_criteria) > 0:
+            d += tags.h2("List Criteria")
+            criteria = tags.ul()
+            for criterion in tl.list_criteria:
+                criteria += tags.li(tags.code(criterion))
+            d += criteria
+
         # output information about other files
         if other_files:
             d += tags.h2("Other Files")
@@ -243,6 +250,7 @@ def render_observing_pages(tl: tlc.TargetList, pl: pr.PriorityList, other_files:
                             "buttons": buttons,
                         },
                         "topEnd": {
+                            "info": True,
                             "searchBuilder": True,
                         },
                     },
