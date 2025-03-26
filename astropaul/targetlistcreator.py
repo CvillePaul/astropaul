@@ -12,6 +12,7 @@ import pandas as pd
 from astropaul.observing import ObservingSession
 import astropaul.phase as ph
 
+import __main__
 
 class TargetList:
     def __init__(
@@ -459,23 +460,23 @@ def add_observability(
 
 def filter_targets(
     tl: TargetList,
-    *,
     criteria,
     inverse: bool = False,
     **kwargs,
 ) -> TargetList:
     answer = tl.copy()
     code = inspect.getsource(criteria).strip()
-    prefix = code.find("criteria=")
-    if prefix > 0:
-        prefix += 9
-    else:
-        prefix = 0
-    answer.list_criteria.append(code[prefix:])
+    if (prefix := code.find("criteria=")) > 0:
+        code = code[prefix + 9:] # try to isolate the code of the lambda function passed in
+    for variable in criteria.__code__.co_names:
+        if value := __main__.__dict__.get(variable, None):
+            code = code.replace(variable, repr(value))
     if inverse:
+        code = "Inverse of: " + code
         answer.target_list = answer.target_list[~criteria(answer.target_list)]
     else:
         answer.target_list = answer.target_list[criteria(answer.target_list)]
+    answer.list_criteria.append(code)
     return answer
 
 
