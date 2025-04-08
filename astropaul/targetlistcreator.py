@@ -592,3 +592,9 @@ def add_rv_status(tl: TargetList, phase_event_defs: list[ph.PhaseEventDef], **kw
     if not pepsi_phases.empty:
         answer.other_lists["PEPSI RV Status"] = pepsi_phases
     return answer
+
+def add_tess_sectors(tl: TargetList, **kwargs) -> TargetList:
+    from astroquery.mast import Tesscut
+    coords = SkyCoord(ra=tl.target_list["ra"], dec=tl.target_list["dec"], unit=u.deg)
+    answer = tl.copy()
+    answer.target_list["TESS Sectors"] = [", ".join(Tesscut.get_sectors(coordinates=coord)["sector"].astype(str)) for coord in coords]
