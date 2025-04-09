@@ -40,7 +40,6 @@ def process_observation_lines(observation_lines: list[str], utc_date: datetime) 
     dssi_sequences = Table(
         names=[
             "Target Name",
-            "TIC ID",
             "Wavelengths",
             "Image Number",
             "UTC DateTime",
@@ -55,7 +54,6 @@ def process_observation_lines(observation_lines: list[str], utc_date: datetime) 
             "Notes",
         ],
         dtype=[
-            "str",
             "str",
             "str",
             "int",
@@ -127,18 +125,11 @@ def process_observation_lines(observation_lines: list[str], utc_date: datetime) 
             else:
                 observations = [(fields["image_num"], wavelengths_optical)]
             coord = SkyCoord(ra=fields["ra"], dec=fields["dec"], unit=(u.hourangle, u.deg))
-            if matches := re.findall("TIC ?(?:ID)? ?=? ?([0-9]+)", line):
-                fields["tic_id"] = "TIC " + matches[0]
-            elif fields["target_name"][:3] == "TIC":
-                fields["tic_id"] = f"TIC {fields["target_name"][3:].strip()}"
-            else:
-                fields["tic_id"] = ""
             for image_num, wavelengths in observations:
                 try:
                     dssi_sequences.add_row(
                         [
                             fields["target_name"].replace('"', ""),
-                            fields["tic_id"],
                             wavelengths,
                             image_num,
                             datetime_utc,
@@ -175,7 +166,6 @@ def determine_dssi_observations(dssi_sequences:Table) -> Table:
     dssi_observations = Table(
         names=[
             "Target Name",
-            "TIC ID",
             "Speckle Session",
             "StartTime JD",
             "MidTime JD",
@@ -183,10 +173,10 @@ def determine_dssi_observations(dssi_sequences:Table) -> Table:
             "MidTime UTC",
             "Num Sequences",
         ],
-        dtype=["str", "str", "str", "float", "float", "float", "str", "int"],
+        dtype=["str", "str", "float", "float", "float", "str", "int"],
     )
 
-    obs_by_session = dssi_sequences.group_by(["Speckle Session", "Target Name", "TIC ID"])
+    obs_by_session = dssi_sequences.group_by(["Speckle Session", "Target Name"])
     for keys, sequences in zip(obs_by_session.groups.keys, obs_by_session.groups):
         start_time = sequences["Time JD"].min()
         end_time = sequences["Time JD"].max()
@@ -195,7 +185,6 @@ def determine_dssi_observations(dssi_sequences:Table) -> Table:
         dssi_observations.add_row(
             (
                 keys["Target Name"],
-                keys["TIC ID"],
                 str(keys["Speckle Session"]),
                 start_time,
                 mid_time,
@@ -242,8 +231,8 @@ def parse_olist_files(files: list[str], out_dir: str = ".", verbose: bool = Fals
         print(f"{sum(overall_observation_types.values())} sequences found")
         for observation_type, count in overall_observation_types.items():
             print(f"    {count:4d}: {observation_type}")
-        if num_failed := sum(map(len, overall_failed_lines.values())) > 0:
-            print(f"{num_failed} observation lines failed matches")
+        if (num_failed := sum(map(len, overall_failed_lines.values()))) > 0:
+            print(f"{num_failed} observation lines failed matches:")
             for file, lines in overall_failed_lines.items():
                 if len(lines) > 0:
                     print(f"{file}")
