@@ -522,7 +522,7 @@ def add_side_status(
         raise ValueError(f"One or more required table missing: {', '.join(required_tables - existing_tables)}")
     answer = tl.copy()
     ephem_table = tl.other_lists["Ephemerides"]
-    side_observations = pd.DataFrame(columns=["Target Name", "Speckle Session", "JD Mid", "UTC Mid", "System", "Member"])
+    side_observations = pd.DataFrame(columns=["Target Name", "Speckle Session", "JD Mid", "UTC Mid", "System", "Member", "SIDE Type"])
     for target_name, speckle in tl.other_lists["Speckle Observations"].iterrows():
         ephem_rows = ephem_table[ephem_table.index == target_name]
         if ephem_rows.empty:
@@ -532,6 +532,10 @@ def add_side_status(
             ephem = ph.Ephemeris.from_dataframe_row(ephem_row)
             state = ph.PhaseEventList.calc_phase_events(ephem, phase_event_defs, beg, end).calc_longest_span(beg, end)
             if state == side_state:
+                if ephem.duration == ephem.duration:
+                    side_type = "Exact"
+                else:
+                    side_type = "Synthetic Duration"
                 side_observations.loc[len(side_observations)] = [
                     target_name,
                     int(speckle["Speckle Session"]),
@@ -539,8 +543,10 @@ def add_side_status(
                     Time(speckle["Speckle Mid"], format="jd").iso[:19],
                     ephem_row["System"],
                     ephem_row["Member"],
+                    side_type
                 ]
     if not side_observations.empty:
+        side_observations.set_index("Target Name", inplace=True)
         answer.other_lists["SIDE Observations"] = side_observations.sort_values(["Target Name", "System", "Member", "JD Mid"])
         side_counts = side_observations.groupby("Target Name").size()
         side_counts.name = "Num SIDE"
