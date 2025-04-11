@@ -172,11 +172,12 @@ def determine_dssi_observations(dssi_sequences:Table) -> Table:
             "EndTime JD",
             "MidTime UTC",
             "Num Sequences",
+            "Wavelengths",
         ],
-        dtype=["str", "str", "float", "float", "float", "str", "int"],
+        dtype=[str, str, float, float, float, str, int, str],
     )
 
-    obs_by_session = dssi_sequences.group_by(["Speckle Session", "Target Name"])
+    obs_by_session = dssi_sequences.group_by(["Speckle Session", "Target Name", "Wavelengths"])
     for keys, sequences in zip(obs_by_session.groups.keys, obs_by_session.groups):
         start_time = sequences["Time JD"].min()
         end_time = sequences["Time JD"].max()
@@ -191,6 +192,7 @@ def determine_dssi_observations(dssi_sequences:Table) -> Table:
                 end_time,
                 mid_utc,
                 len(sequences),
+                keys["Wavelengths"],
             )
         )
 
