@@ -15,7 +15,8 @@ def pepsi2html(spectrum_dirs: list[str], out_dir: str = ".", verbose: bool = Fal
     for spectrum_dir_pattern in spectrum_dirs:
         fixed_dir_pattern = spectrum_dir_pattern.replace('"', '') # powershell does crappy things w/ trailing backslashes
         for spectrum_dir in glob(fixed_dir_pattern):
-            outfile = os.path.join(out_dir, f"PEPSI Spectra {os.path.basename(spectrum_dir)}.html")
+            dir_name = os.path.basename(os.path.normpath(spectrum_dir))
+            outfile = os.path.join(out_dir, f"PEPSI Spectra {dir_name}.html")
             output_file(outfile)
             plots = []
             spectrum_files = sum(
@@ -64,9 +65,8 @@ if __name__ == '__main__':
         description="Convert reduced PEPSI .bwl file(s) into a single HTML file showing all spectra",
     )
 
-    parser.add_argument("-o", "--outfile", default="pepsi_spectra.html", help="Name of file to create (default = %(default)s)")
+    parser.add_argument("-o", "--outdir", default=".", help="Directory for html output file (default = %(default)s)")
     parser.add_argument("-v", "--verbose", action="store_true", help="Output file info as each file is processed")
     parser.add_argument("filenames", nargs="+", help="List of PEPSI spectrum files to process")
     args = parser.parse_args()
-
-    pepsi2html(args.filenames, args.outfile, args.verbose)
+    pepsi2html(args.filenames, args.outdir, args.verbose)
