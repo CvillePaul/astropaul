@@ -4,6 +4,7 @@ from dataclasses import dataclass, replace
 
 import pandas as pd
 
+
 @dataclass
 class Ephemeris:
     """Holds all parameters necessary to calculate eclipse events"""
@@ -17,6 +18,7 @@ class Ephemeris:
 
     def from_dataframe_row(row: pd.DataFrame) -> "Ephemeris":
         return Ephemeris(*row[["System", "Member", "T0", "Period", "Duration"]])
+
 
 @dataclass
 class PhaseEvent:
@@ -36,6 +38,7 @@ class PhaseEvent:
     def to_list(self) -> list:
         return [self.system, self.member, self.orbit, self.jd, self.phase, self.type]
 
+
 @dataclass
 class PhaseEventDef:
     """Holds code that defines some type of configuration of bodies that occurs once each period of a bound system."""
@@ -46,15 +49,15 @@ class PhaseEventDef:
 
 def calc_time_of_phase(name: str, ephemeris: Ephemeris, orbit: int, phase: float) -> PhaseEvent:
     """Calculates events of a bound system that occur at a particular point in the phase of the system
-    
+
     :param name: Descriptive title of the event, such as "mid eclipse"
-    :type name: str 
+    :type name: str
     :param ephemeris: Parameters of the bound system
-    :type ephemeris: Ephemeris 
+    :type ephemeris: Ephemeris
     :param orbit: Orbit number in which the calculation should occur, starting with orbit zero at t0
-    :type orbit: int 
+    :type orbit: int
     :param phase: The desired phase value, from 0. to 1., at which the event occurs
-    :type phase: float """
+    :type phase: float"""
     return PhaseEvent(
         jd=ephemeris.t0 + orbit * ephemeris.period + phase * ephemeris.period,
         system=ephemeris.system,
@@ -69,22 +72,30 @@ def calc_mid_eclipse(name: str, ephemeris: Ephemeris, orbit: int) -> PhaseEvent:
     return calc_time_of_phase(name, ephemeris, orbit, 0.0)
 
 
-def calc_time_of_gress(name: str, ephemeris: Ephemeris, orbit: int, ingress: bool = True) -> PhaseEvent:
+def calc_time_of_gress(
+    name: str, ephemeris: Ephemeris, orbit: int, ingress: bool = True, synthetic_phase_percent: float = float("NaN")
+) -> PhaseEvent:
     """Calculates the time of ingress or egress of an eclipsing system
-    
+
     :param name: Descriptive title of the event, such as "egress"
-    :type name: str 
+    :type name: str
     :param ephemeris: Parameters of the bound system
-    :type ephemeris: Ephemeris 
+    :type ephemeris: Ephemeris
     :param orbit: The orbit number in which the calculation should occur, starting with orbit zero at t0
-    :type orbit: int 
+    :type orbit: int
     :param ingress: If true, calculate time of ingress into eclipse, otherwise, calculate time of egress
-    :type ingress: bool """
+    :type ingress: bool
+    :param synthetic_phase_percent: If duration is missing from ephemeris, calculate ingress/egress based on this percentage of the phase cycle
+    :type synthetic_phase_percent: float
+    """
     t = ephemeris.t0 + orbit * ephemeris.period  # mid eclipse
     if ephemeris.duration == ephemeris.duration:
         half_duration = ephemeris.duration / 2
     else:
-        half_duration = 0
+        if synthetic_phase_percent == synthetic_phase_percent:
+            half_duration = ephemeris.period * synthetic_phase_percent / 2
+        else:
+            half_duration = 0
     phase_change = half_duration / ephemeris.period
     if ingress:
         t += ephemeris.period - half_duration
@@ -97,6 +108,7 @@ def calc_time_of_gress(name: str, ephemeris: Ephemeris, orbit: int, ingress: boo
 
 class PhaseEventList:
     """Holds a list of PhaseEvent instances that occur between a specific start and end JD time"""
+
     def __init__(
         self,
         beg: float = float("nan"),
@@ -170,7 +182,7 @@ class PhaseEventList:
             raise ValueError("Time segment not chronological")
         if not ephem or not event_defs:
             raise ValueError("No parameters can be None")
-        orbit = int((beg - ephem.t0) / ephem.period) - 1 # previous orbit helps when window is short & event defs are few
+        orbit = int((beg - ephem.t0) / ephem.period) - 1  # previous orbit helps when window is short & event defs are few
         prev_event = None
         i = 0
         events = []
