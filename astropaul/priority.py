@@ -359,6 +359,10 @@ def prioritize_side_observation(pl: PriorityList, side_state: str = "Eclipse", s
     existing_tables = set(pl.target_list.other_lists.keys())
     if not existing_tables.issuperset(required_tables):
         raise ValueError(f"One or more required table missing: {', '.join(required_tables - existing_tables)}")
+    sample_target_table = next(iter(pl.target_tables.values()))[0]
+    sequence_column = f"{side_state} Sequence"
+    if not sequence_column in sample_target_table.columns:
+        raise ValueError(f"Target score tables must include a column named {sequence_column}")
 
     # define what kind of eclipses we care about, eg: any A, or Aa specifically, etc.
     def calc_eclipse_type(row):
@@ -388,7 +392,7 @@ def prioritize_side_observation(pl: PriorityList, side_state: str = "Eclipse", s
     # build a dictionary that lists all eclipse types already observed in prior speckle sessions: dict[target, set[eclipse_type]]
     prior_observations = {}
     for _, row in pl.target_list.other_lists["SIDE Observations"].iterrows():
-        target_name = row["Target Name"]
+        target_name = str(row.name)
         eclipse_type = calc_eclipse_type(row)
         target_observed = prior_observations.get(target_name, set())
         target_observed.add(eclipse_type)
@@ -406,7 +410,7 @@ def prioritize_side_observation(pl: PriorityList, side_state: str = "Eclipse", s
         target_possibilities = possible_eclipses[target_name]
         for target_table in target_tables:
             for index, row in target_table.iterrows():
-                opportunities_string = row[f"{side_state} Sequence"]
+                opportunities_string = row[sequence_column]
                 if not opportunities_string:
                     continue
                 target_table.loc[index, "Prior SIDE Observations"] = ", ".join(target_observed)
