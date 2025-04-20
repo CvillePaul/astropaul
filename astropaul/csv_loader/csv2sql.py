@@ -9,6 +9,68 @@ import pandas as pd
 import sqlalchemy as sa
 
 
+class TableConfig:
+    def __init__(self):
+        self.table_name: str = "table"
+        self.has_id_column: bool = False
+        self.constraints: dict[str, tuple[str, str]] = dict()  # column name: (table name, column name) of foreign table
+        self.column_types: dict[str, object] = dict()
+
+    def validate_csv_schemas(self, data_files: list[tuple[Path, pd.DataFrame]]):
+        reference_file, reference_df = data_files[0]  # Use first file as reference
+        all_columns = set(reference_df.columns)
+        specified_columns = {}
+        for column, column_type in self.column_types.items():
+            if column not in all_columns:
+                raise ValueError(f"Column {column} specified in config file but not present in {reference_file}")
+            specified_columns[column] = column_type
+        inferred_columns = {
+            column: series_to_column_type(reference_df[column])
+            for column in reference_df.columns
+            if column not in specified_columns
+        }
+        self.column_types = {**specified_columns, **inferred_columns}
+        for file_name, data_file in data_files[1:]:  # validate all remaining files against schema we just built
+            df_columns = set(data_file.columns)
+            if df_columns != all_columns:
+                raise ValueError(
+                    (
+                        f"Schema mismatch in {file_name} vs reference file {reference_file}. "
+                        "Expected columns: {all_columns}, Found: {df_columns}"
+                    )
+                )
+            for column, column_type in inferred_columns.items():
+                this_type = series_to_column_type(data_file[column])
+                if this_type != column_type:
+                    raise ValueError(
+                        (f"Data type mismatch in {file_name} for column {column}: " "{this_type} instead of {column_type}")
+                    )
+
+    @classmethod
+    def from_config_file(cls, config_file: Path) -> "TableConfig":
+        answer = TableConfig()
+        answer.table_name = config_file.name[:-4]
+        if config_file.exists():
+            config = configparser.ConfigParser()
+            config.optionxform = str  # don't convert keys to lower case
+            config.read(config_file)
+            answer.table_name = config.get("options", "table name", fallback=answer.table_name)
+            answer.has_id_column = config.getboolean("options", "create id column", fallback=False)
+            if config.has_section("columns"):
+                for column, column_type_str in config.items("columns"):
+                    if not (column_type := string_to_column_type(column_type_str)):
+                        raise ValueError(f"Unknown column type {column_type_str} in file {config_file}")
+                    answer.column_types[column] = column_type
+            if config.has_section("constraints"):
+                for column, foreign_column in config.items("constraints"):
+                    parts = foreign_column.split(".")
+                    if not parts or len(parts) != 2:
+                        raise ValueError(f"Bad constraint {foreign_column} for column {column} in {config_file}")
+                    foreign_table, foreign_column = parts
+                    answer.constraints[column] = (foreign_table, foreign_column)
+        return answer
+
+
 def db_naming_style(name: str) -> str:
     """Converts a directory or CSV column name to its database equivalent"""
     return name.lower().replace(" ", "_")
@@ -36,51 +98,25 @@ def string_to_column_type(column_type_str: str) -> object:
     return column_type
 
 
-def validate_csv_schemas(
-    data_files: list[tuple[Path, pd.DataFrame]], specified_columns: dict[str, object]
-) -> dict[str, object]:
-    reference_file, reference_df = data_files[0]  # Use first file as reference
-    all_columns = set(reference_df.columns)
-    column_types = {}
-    for column, column_type in specified_columns.items():
-        if column not in all_columns:
-            raise ValueError(f"Column {column} specified in config file but not present in {reference_file}")
-        column_types[column] = column_type
-    inferred_columns = {
-        column: series_to_column_type(reference_df[column])
-        for column in reference_df.columns
-        if column not in specified_columns
-    }
-    column_types = {**column_types, **inferred_columns}
-    for file_name, data_file in data_files[1:]:  # validate all remaining files against schema we just built
-        df_columns = set(data_file.columns)
-        if df_columns != all_columns:
-            raise ValueError(f"Schema mismatch in {file_name}. Expected columns: {all_columns}, Found: {df_columns}")
-        for column, column_type in inferred_columns.items():
-            this_type = series_to_column_type(data_file[column])
-            if this_type != column_type:
-                raise ValueError(f"Data type mismatch in {file_name} for column {column}: {this_type} instead of {column_type}")
-    return column_types
-
-
-def create_table(engine, metadata, table_name: str, column_map: dict[str, object]):
+def create_table(metadata, table_config: TableConfig):
     table_columns = []
-    # table_columns.append(sa.Column("id", sa.Integer, primary_key=True, autoincrement=True))
-    for column_name, column_type in column_map.items():
+    if table_config.has_id_column:
+        table_columns.append(sa.Column("id", sa.Integer, primary_key=True, autoincrement=True))
+    for column_name, column_type in table_config.column_types.items():
         table_columns.append(sa.Column(db_naming_style(column_name), column_type))
-    table = sa.Table(db_naming_style(table_name), metadata, *table_columns)
+    table = sa.Table(db_naming_style(table_config.table_name), metadata, *table_columns)
     return table
 
 
-def determine_table_order(table_names: list[str], constraints: dict[str, dict[str, tuple[str, str]]]) -> list[str]:
+def determine_table_order(table_configs: dict[str, TableConfig]) -> list[str]:
     dependency_graph = nx.DiGraph()
-    for table_name in table_names:
+    for table_name in table_configs.keys():
         dependency_graph.add_node(table_name)
-    for child_table, child_table_deps in constraints.items():
-        for _, (source_table, _) in child_table_deps.items():
+    for child_table, table_config in table_configs.items():
+        for _, (source_table, _) in table_config.constraints.items():
             dependency_graph.add_edge(source_table, child_table)
     if not nx.is_directed_acyclic_graph(dependency_graph):
-        raise ValueError(f"Dependency graph is not acyclic.  Dependencies are: {constraints}")
+        raise ValueError(f"Dependency graph is not acyclic.  Dependencies are: {table_config.constraints}")
     table_order = list(nx.topological_sort(dependency_graph))
     return table_order
 
@@ -89,55 +125,30 @@ def insert_csv_data(
     engine: sa.Engine,
     metadata: sa.MetaData,
     data_files: list[tuple[str, pd.DataFrame]],
-    table_name: str,
-    constraints: dict[str, tuple[str, str]],
+    table_config: TableConfig,
 ) -> int:
+    # retrieve values of foreign key constraints for validation before inserting data
     validation_values = {}
-    for child_column, (source_table_name, source_column) in constraints.items():
+    for child_column, (source_table_name, source_column) in table_config.constraints.items():
         source_table = metadata.tables[db_naming_style(source_table_name)]
         with engine.connect() as conn:
             result = conn.execute(sa.select(source_table.c[db_naming_style(source_column)]))
             validation_values[child_column] = set([row[0] for row in result])
+    # validate and insert rows from each data file
     num_rows = 0
     for file_name, data_file in data_files:
-        for child_column in constraints.keys():
+        for child_column in table_config.constraints.keys():
             valid_column_values = validation_values[child_column]
             for value in data_file[child_column].unique():
                 if not value in valid_column_values:
                     raise ValueError(
-                        f"In file {file_name} for table {table_name}, value {value} not found in {source_table}.{source_column}"
+                        f"In file {file_name} for table {table_config.table_name}, value {value} not found in {source_table_name}.{source_column}"
                     )
         db_frame = data_file.copy()
         db_frame.columns = [db_naming_style(column) for column in db_frame.columns]
-        db_frame.to_sql(db_naming_style(table_name), engine, if_exists="append", index=False)
+        db_frame.to_sql(db_naming_style(table_config.table_name), engine, if_exists="append", index=False)
         num_rows += len(data_file)
     return num_rows
-
-
-def parse_table_config(table_dir: Path) -> tuple[dict[str, object], dict[str, str]]:
-    config_file = table_dir / f"{table_dir.name}.ini"
-    if config_file.exists():
-        config = configparser.ConfigParser()
-        config.optionxform = str
-        config.read(config_file)
-        specified_columns = {}
-        if "columns" in config.sections():
-            for column, column_type_str in config.items("columns"):
-                if not (column_type := string_to_column_type(column_type_str)):
-                    raise ValueError(f"Unknown column type {column_type_str} in file {config_file}")
-                specified_columns[column] = column_type
-
-        constraints = {}  # key is column name, value is (table name, column name) of foreign table
-        if "constraints" in config.sections():
-            for column, foreign_column in config.items("constraints"):
-                parts = foreign_column.split(".")
-                if not parts or len(parts) != 2:
-                    raise ValueError(f"Bad constraint {foreign_column} for column {column} in {config_file}")
-                foreign_table, foreign_column = parts
-                constraints[column] = (foreign_table, foreign_column)
-    else:
-        specified_columns, constraints = {}, {}
-    return specified_columns, constraints
 
 
 def get_data_files(data_dir: Path) -> list[tuple[str, pd.DataFrame]]:
@@ -162,7 +173,7 @@ def csv2sql(base_dir: str, outfile: str, verbose: bool = False):
 
         # find files by subdir, validate their schemas, and create empty tables
         data_files_by_table = {}  # key is table name, value is list of (filename, DataFrame)
-        constraints = {}  # key is table name, value is dict of column: (table, column) of foreign table
+        table_configs = {}  # key is table name, value is TableConfig
         for table_dir in Path(base_dir).iterdir():
             table_name = table_dir.name
             if not table_dir.is_dir():
@@ -173,21 +184,23 @@ def csv2sql(base_dir: str, outfile: str, verbose: bool = False):
                     print(f"Skipping directory with no data files: {table_dir}")
                 continue
             data_files_by_table[table_name] = data_files
-            specified_columns, table_constraints = parse_table_config(table_dir)
-            constraints[table_name] = table_constraints
-            column_map = validate_csv_schemas(data_files, specified_columns)
-            create_table(engine, metadata, table_name, column_map)
+            config_file = table_dir / f"{table_dir.name}.ini"
+            table_config = TableConfig.from_config_file(config_file)
+            table_config.validate_csv_schemas(data_files)
+            table_configs[table_config.table_name] = table_config
+            create_table(metadata, table_config)
             if verbose:
-                print(f"Created table {table_name} with {len(column_map)} columns")
+                print(f"Created table {table_name} with {len(table_config.column_types)} columns")
         metadata.create_all(engine)
 
         # load data into the new tables
-        table_order = determine_table_order(data_files_by_table.keys(), constraints)
+        table_order = determine_table_order(table_configs)
         for table_name in table_order:
             data_files = data_files_by_table[table_name]
-            num_rows = insert_csv_data(engine, metadata, data_files, table_name, constraints.get(table_name, {}))
+            table_config = table_configs[table_name]
+            num_rows = insert_csv_data(engine, metadata, data_files, table_config)
             if verbose:
-                print(f"{num_rows:5d} rows inserted into table {table_name} from {len(data_files)} files")
+                print(f"{num_rows:5d} rows inserted into table {table_config.table_name} from {len(data_files)} files")
 
         if verbose:
             print(f"Database {outfile_path} created")
