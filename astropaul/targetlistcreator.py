@@ -1,5 +1,6 @@
 import collections
 import inspect
+from sqlite3 import Connection
 from typing import Any
 
 import astroplan as ap
@@ -90,8 +91,9 @@ class TargetList:
 
 
 class TargetListCreator:
-    def __init__(self, name: str = "Standard", steps: list = None, **kwargs):
+    def __init__(self, name: str = "Standard", connection: Connection = None, steps: list = None, **kwargs):
         self.name = name
+        self.connection = connection
         self.kwargs = kwargs.copy()
         self.steps = steps
 
@@ -105,7 +107,7 @@ class TargetListCreator:
             initial_list = initial_list.copy()
             initial_list.name = self.name
         intermediate_tl = initial_list if initial_list else TargetList(name=self.name)
-        merged_kwargs = {**self.kwargs, **kwargs}
+        merged_kwargs = {"connection": self.connection, **self.kwargs, **kwargs}
         if steps is None:
             steps = self.steps
         for step in steps:
