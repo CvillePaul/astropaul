@@ -8,7 +8,6 @@ import networkx as nx
 import pandas as pd
 import sqlalchemy as sa
 
-
 class TableConfig:
     def __init__(self):
         self.table_name: str = "table"
@@ -71,10 +70,17 @@ class TableConfig:
         return answer
 
 
-def db_naming_style(name: str) -> str:
+def string_to_db_style(name: str) -> str:
     """Converts a directory or CSV column name to its database equivalent"""
     return name.lower().replace(" ", "_")
 
+def db_style_to_string(name: str) -> str:
+    """Converts a name in database style back to a more pretty, human form"""
+    answer = name.replace("_", " ")
+    answer = answer.title()
+    for string in ["Jd", "Utc", "Id", "Dssi", "Ra", "Hms", "Dms"]:
+        answer = answer.replace(string, string.upper())
+    return answer
 
 def series_to_column_type(series: pd.Series) -> str:
     if pd.api.types.is_integer_dtype(series):
@@ -103,8 +109,8 @@ def create_table(metadata, table_config: TableConfig):
     if table_config.has_id_column:
         table_columns.append(sa.Column("id", sa.Integer, primary_key=True, autoincrement=True))
     for column_name, column_type in table_config.column_types.items():
-        table_columns.append(sa.Column(db_naming_style(column_name), column_type))
-    table = sa.Table(db_naming_style(table_config.table_name), metadata, *table_columns)
+        table_columns.append(sa.Column(string_to_db_style(column_name), column_type))
+    table = sa.Table(string_to_db_style(table_config.table_name), metadata, *table_columns)
     return table
 
 
@@ -130,9 +136,9 @@ def insert_csv_data(
     # retrieve values of foreign key constraints for validation before inserting data
     validation_values = {}
     for child_column, (source_table_name, source_column) in table_config.constraints.items():
-        source_table = metadata.tables[db_naming_style(source_table_name)]
+        source_table = metadata.tables[string_to_db_style(source_table_name)]
         with engine.connect() as conn:
-            result = conn.execute(sa.select(source_table.c[db_naming_style(source_column)]))
+            result = conn.execute(sa.select(source_table.c[string_to_db_style(source_column)]))
             validation_values[child_column] = set([row[0] for row in result])
     # validate and insert rows from each data file
     num_rows = 0
@@ -145,8 +151,8 @@ def insert_csv_data(
                         f"In file {file_name} for table {table_config.table_name}, value {value} not found in {source_table_name}.{source_column}"
                     )
         db_frame = data_file.copy()
-        db_frame.columns = [db_naming_style(column) for column in db_frame.columns]
-        db_frame.to_sql(db_naming_style(table_config.table_name), engine, if_exists="append", index=False)
+        db_frame.columns = [string_to_db_style(column) for column in db_frame.columns]
+        db_frame.to_sql(string_to_db_style(table_config.table_name), engine, if_exists="append", index=False)
         num_rows += len(data_file)
     return num_rows
 
