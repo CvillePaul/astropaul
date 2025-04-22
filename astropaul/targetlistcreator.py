@@ -10,10 +10,12 @@ import astropy.units as u
 import numpy as np
 import pandas as pd
 
+from astropaul.csv_loader.csv2sql import db_style_to_string
 from astropaul.observing import ObservingSession
 import astropaul.phase as ph
 
 import __main__
+
 
 class TargetList:
     def __init__(
@@ -47,13 +49,13 @@ class TargetList:
         self.other_lists[name] = other
 
     def summarize(self) -> str:
-        answer = f"{self.name}\n"
+        answer = f"Name: {self.name}\n"
         answer += "Criteria\n"
         if len(self.list_criteria) > 0:
             for criterion in self.list_criteria:
                 answer += f"    {criterion}\n"
         else:
-            answer += "    (none)"
+            answer += "    (none)\n"
         target_types = collections.Counter(self.target_list["Target Type"])
         answer += f"{len(self.target_list)} targets:\n"
         for type, count in target_types.items():
@@ -119,21 +121,38 @@ class TargetListCreator:
         return intermediate_tl
 
 
+# some convenience functions
+def convert_columns_to_human_style(df: pd.DataFrame) -> None:
+    if index_name := df.index.name:
+        df.index.name = db_style_to_string(index_name)
+    df.columns = map(db_style_to_string, df)
+
+
+def verify_step_requirements(tl: TargetList, required_tables: set[str] = None, required_columns: set[str] = None):
+    if tl.target_list.empty:
+        raise ValueError("Target List cannot be empty")
+    if required_tables:
+        existing_tables = set(tl.other_lists.keys())
+        if not required_tables.issubset(existing_tables):
+            raise ValueError(f"Required table(s) missing: {required_tables - existing_tables}")
+    if required_columns:
+        existing_columns = set(tl.target_list.columns)
+        if not required_columns.issubset(existing_columns):
+            raise ValueError(f"Required column(s) missing: {required_columns - existing_columns}")
+
+
 # following are methods to be used as steps of a TargetListCreator
 
 
-def add_targets(tl: TargetList = TargetList(), column_prefix="Target ", **kwargs) -> TargetList:
-    """
-    Add rows for each target in the database
-    """
+def add_targets(tl: TargetList = TargetList(), **kwargs) -> TargetList:
+    """Add rows for each target in the database"""
     targets = pd.read_sql(
-        "select * from tom_target t;",
+        "select * from targets;",
         kwargs["connection"],
-        index_col="id",
+        index_col="target_name",
     )
-    new_column_names = {column: f"{column_prefix}{column.capitalize()}" for column in targets.columns}
-    targets.rename(columns=new_column_names, inplace=True)
-    column_groups = {"Target": ([f"{column_prefix}Name"], [f"{column_prefix}Source", f"{column_prefix}Type"])}
+    convert_columns_to_human_style(targets)
+    column_groups = {"Target": (["Target Name"], [column for column in targets.columns if column != "Target Name"])}
     return TargetList.merge(tl, targets, column_groups, {})
 
 
@@ -146,124 +165,79 @@ def concat_dataframe(tl: TargetList, other_df: pd.DataFrame, **kwargs) -> Target
     )
 
 
-def add_speckle(tl: TargetList, column_prefix="Speckle ", **kwargs) -> TargetList:
-    # first, add a column for total observations to main table
-    count_column = f"Num {column_prefix.replace(" ", "")}"
-    num_speckle = pd.read_sql(
-        f"""
-        select ss.target_id, count(ss.id) as '{count_column}'
-        from tom_specklesession ss
-        group by ss.target_id
-        ;
-        """,
-        kwargs["connection"],
-        index_col="target_id",
-    )
-    column_groups = {"Count": ([count_column], [])}
-    # next, add a separate table of all speckle observations
-    speckle = pd.read_sql(
-        """
-        select t.name 'Target Name', ss.speckle_session Session, ss.num_sequences Sequences, ss.start_jd Start, ss.mid_jd Mid, ss.end_jd End
-        from tom_specklesession ss
-        join tom_target as t on t.id = ss.target_id
-        ;
-        """,
-        kwargs["connection"],
-        index_col="Target Name",
-    )
-    existing_targets = tl.target_list["Target Name"].to_list()
-    speckle = speckle[speckle.index.isin(existing_targets)]
-    new_column_names = {column: f"{column_prefix}{column.capitalize()}" for column in speckle.columns}
-    speckle.rename(columns=new_column_names, inplace=True)
-    speckle[f"{column_prefix}Mid UTC"] = Time(speckle[f"{column_prefix}Mid"], format="jd").iso
-    answer = TargetList.merge(tl, num_speckle, column_groups, {"Speckle Observations": speckle})
+def add_dssi(tl: TargetList, **kwargs) -> TargetList:
+    verify_step_requirements(tl)
+    answer = tl.copy()
+    # add a table of all dssi observations
+    all_targets = list(tl.target_list.index)
+    dssi_observations = pd.read_sql("select * from dssi_observations;", kwargs["connection"])
+    dssi_observations = dssi_observations[dssi_observations["target_name"].isin(all_targets)]
+    convert_columns_to_human_style(dssi_observations)
+    answer.other_lists["DSSI Observations"] = dssi_observations
+
+    # add to the target list a column indicating the number of dssi observations for each target
+    count_column = "Num DSSI"
+    dssi_counts = dssi_observations["Target Name"].value_counts()
+    answer.target_list[count_column] = dssi_counts
     answer.target_list[count_column] = answer.target_list[count_column].fillna(0).astype(int)
+    primary_columns, secondary_columns = answer.column_groups.get("Count", ([], []))
+    primary_columns.append(count_column)
+    answer.column_groups["Count"] = (primary_columns, secondary_columns)
     return answer
 
 
 def add_pepsi(tl: TargetList, **kwargs) -> TargetList:
-    # first, add a column for total observations to main table
+    verify_step_requirements(tl)
+    answer = tl.copy()
+    # add a table of all pepsi observations
+    all_targets = list(tl.target_list.index)
+    pepsi_observations = pd.read_sql("select * from pepsi_spectra;", kwargs["connection"])
+    pepsi_observations = pepsi_observations[pepsi_observations["target_name"].isin(all_targets)]
+    convert_columns_to_human_style(pepsi_observations)
+    answer.other_lists["PEPSI Observations"] = pepsi_observations
+
+    # add to the target list a column indicating the number of dssi observations for each target
     count_column = "Num PEPSI"
-    spectra_count = pd.read_sql(
-        f"""
-        select target_id, count(id) as '{count_column}'
-        from tom_spectrumrawdata
-        group by target_id
-        ;""",
-        kwargs["connection"],
-        index_col="target_id",
-    )
-    column_groups = {"Count": ([count_column], [])}
-    # next, add a separate table of all spectra
-    spectra = pd.read_sql(
-        """
-        select 
-            t.name 'Target Name', 
-            srd.id 'PEPSI ID', 
-            srd.fiber Fiber, 
-            srd.arm Arm, 
-            srd.cross_disperser 'Cross Disperser', 
-            srd.uri 'File Name', 
-            srd.datetime_utc 'Start UTC', 
-            srd.exposure_time 'Exposure Time'
-        from tom_spectrumrawdata as srd
-        join tom_target as t on t.id = srd.target_id
-        """,
-        kwargs["connection"],
-        index_col="Target Name",
-    )
-    existing_targets = tl.target_list["Target Name"].to_list()
-    spectra = spectra[spectra.index.isin(existing_targets)]
-    spectra["Start JD"] = [Time(utc_time, format="iso").jd for utc_time in spectra["Start UTC"].values]
-    answer = TargetList.merge(tl, spectra_count, column_groups, {"PEPSI": spectra})
-    answer.target_list[count_column] = answer.target_list[count_column].fillna(int(0))
+    dssi_counts = pepsi_observations["Target Name"].value_counts()
+    answer.target_list[count_column] = dssi_counts
+    answer.target_list[count_column] = answer.target_list[count_column].fillna(0).astype(int)
+    primary_columns, secondary_columns = answer.column_groups.get("Count", ([], []))
+    primary_columns.append(count_column)
+    answer.column_groups["Count"] = (primary_columns, secondary_columns)
     return answer
 
 
-def add_lists(tl: TargetList, column_prefix="List ", **kwargs) -> TargetList:
+def add_lists(tl: TargetList, **kwargs) -> TargetList:
+    verify_step_requirements(tl)
     conn = kwargs["connection"]
-    list_names = [name[0] for name in conn.execute("select name from tom_targetlist;").fetchall()]
+    target_lists = [name[0] for name in conn.execute("select target_list from target_lists;").fetchall()]
     answer = tl.copy()
-    for target_list in list_names:
+    for target_list in target_lists:
         list_members = [
             result[0]
             for result in conn.execute(
                 """
-                select t.name
-                from tom_targetlist tl
-                join tom_targetlist_targets tlt on tlt.targetlist_id = tl.id
-                join tom_target t on t.id = tlt.target_id
-                where tl.name = ?
+                select target_name 
+                from target_list_members
+                where target_list = ?
                 ;""",
                 [target_list],
             ).fetchall()
         ]
-        column_name = f"{column_prefix}{target_list}"
-        # column_name = f'{column_prefix}{target_list.replace(" ", "_").capitalize()}'
-        # TODO: remove hard-coded column name in following line
-        answer.target_list[column_name] = answer.target_list["Target Name"].isin(list_members)
-        answer.column_groups[column_prefix] = ([], [f"{column_prefix}{name}" for name in list_names])
+        column_name = f"List {target_list}"
+        answer.target_list[column_name] = answer.target_list.index.isin(list_members)
+    answer.column_groups["List"] = ([], [f"List {name}" for name in target_lists])
     return answer
 
 
 def add_ephemerides(tl: TargetList, **kwargs) -> TargetList:
-    ephem = pd.read_sql(
-        """
-        select t.name "Target Name", bp.system, bp.member, bp.period, bp.t0, bp.duration, bp.depth
-        from tom_binaryparameters bp
-        join tom_scienceresult sr on sr.id = bp.scienceresult_ptr_id
-        join tom_target t on t.id = sr.target_id
-        ;""",
-        kwargs["connection"],
-        index_col="Target Name",
-    )
-    existing_targets = tl.target_list["Target Name"]
-    ephem = ephem[ephem.index.isin(existing_targets)]
-    ephem["period"] = ephem["period"] / 3600 / 24  # convert from seconds to days
-    ephem["duration"] = ephem["duration"] / 3600 / 24  # convert from seconds to days
-    ephem["Duration (Hours)"] = [f"{duration * 24:.1f}" for duration in ephem["duration"]]  # also convert duration to hours
-    new_column_names = {column: column.capitalize() for column in ephem.columns}
-    ephem.rename(columns=new_column_names, inplace=True)
+    verify_step_requirements(tl)
+    ephem = pd.read_sql("select * from ephemerides;", kwargs["connection"], index_col="target_name")
+    all_targets = list(tl.target_list.index)
+    ephem = ephem[ephem.index.isin(all_targets)]
+    convert_columns_to_human_style(ephem)
+    ephem["Duration (Hours)"] = ephem["Duration"]
+    ephem["Duration"] = [duration / 24 for duration in ephem["Duration (Hours)"]]  # also convert duration to hours
     answer = tl.copy()
     answer.add_other("Ephemerides", ephem)
     return answer
@@ -273,8 +247,8 @@ def add_phase_events(
     tl: TargetList, observing_session: ObservingSession, phase_event_defs: list[ph.PhaseEventDef], **kwargs
 ) -> TargetList:
     """Calculate what phase events are in effect for each observing segment"""
-    if (ephem_table := tl.other_lists.get("Ephemerides", pd.DataFrame())).empty:
-        raise ValueError("Ephem table not present")
+    verify_step_requirements(tl, {"Ephemerides"})
+    ephem_table = tl.other_lists["Ephemerides"]
     answer = tl.copy()
     ephems = {}
     phase_events = pd.DataFrame(
@@ -469,7 +443,7 @@ def filter_targets(
     answer = tl.copy()
     code = inspect.getsource(criteria).strip()
     if (prefix := code.find("criteria=")) > 0:
-        code = code[prefix + 9:] # try to isolate the code of the lambda function passed in
+        code = code[prefix + 9 :]  # try to isolate the code of the lambda function passed in
     for variable in criteria.__code__.co_names:
         if value := __main__.__dict__.get(variable, None):
             code = code.replace(variable, repr(value))
@@ -482,34 +456,32 @@ def filter_targets(
     return answer
 
 
-def add_speckle_phase(tl: TargetList, phase_event_defs: list[ph.PhaseEventDef], **kwargs) -> TargetList:
+def add_dssi_phase(tl: TargetList, phase_event_defs: list[ph.PhaseEventDef], **kwargs) -> TargetList:
     """Calculate what PhaseEventDef was most in effect during a speckle observation"""
-    required_tables = {"Speckle Observations", "Ephemerides"}
-    existing_tables = set(tl.other_lists.keys())
-    if not existing_tables.issuperset(required_tables):
-        raise ValueError(f"One or more required table missing: {', '.join(required_tables - existing_tables)}")
+    verify_step_requirements(tl, {"DSSI Observations", "Ephemerides"})
     answer = tl.copy()
     ephem_table = tl.other_lists["Ephemerides"]
-    speckle_phases = pd.DataFrame(columns=["Target Name", "Speckle Session", "JD Mid", "UTC Mid", "System", "Member", "State"])
-    for target_name, speckle in tl.other_lists["Speckle Observations"].iterrows():
+    speckle_phases = pd.DataFrame(columns=["Target Name", "DSSI Session", "JD Mid", "UTC Mid", "System", "Member", "State"])
+    for _, speckle in tl.other_lists["DSSI Observations"].iterrows():
+        target_name = speckle["Target Name"]
         ephem_rows = ephem_table[ephem_table.index == target_name]
         if ephem_rows.empty:
             continue
-        beg, end = speckle["Speckle Start"], speckle["Speckle End"]
+        beg, end = speckle["Starttime JD"], speckle["Endtime JD"]
         for _, ephem_row in ephem_rows.sort_values(["System", "Member"]).iterrows():
             ephem = ph.Ephemeris.from_dataframe_row(ephem_row)
             state = ph.PhaseEventList.calc_phase_events(ephem, phase_event_defs, beg, end).calc_longest_span(beg, end)
             speckle_phases.loc[len(speckle_phases)] = [
                 target_name,
-                int(speckle["Speckle Session"]),
-                speckle["Speckle Mid"],
-                Time(speckle["Speckle Mid"], format="jd").iso[:19],
+                int(speckle["DSSI Session"]),
+                speckle["Midtime JD"],
+                speckle["Midtime UTC"],
                 ephem_row["System"],
                 ephem_row["Member"],
                 state,
             ]
     if not speckle_phases.empty:
-        answer.other_lists["Speckle Phases"] = speckle_phases
+        answer.other_lists["DSSI Phases"] = speckle_phases
     return answer
 
 
@@ -524,7 +496,9 @@ def add_side_status(
         raise ValueError(f"One or more required table missing: {', '.join(required_tables - existing_tables)}")
     answer = tl.copy()
     ephem_table = tl.other_lists["Ephemerides"]
-    side_observations = pd.DataFrame(columns=["Target Name", "Speckle Session", "JD Mid", "UTC Mid", "System", "Member", "SIDE Type"])
+    side_observations = pd.DataFrame(
+        columns=["Target Name", "Speckle Session", "JD Mid", "UTC Mid", "System", "Member", "SIDE Type"]
+    )
     for target_name, speckle in tl.other_lists["Speckle Observations"].iterrows():
         ephem_rows = ephem_table[ephem_table.index == target_name]
         if ephem_rows.empty:
@@ -545,7 +519,7 @@ def add_side_status(
                     Time(speckle["Speckle Mid"], format="jd").iso[:19],
                     ephem_row["System"],
                     ephem_row["Member"],
-                    side_type
+                    side_type,
                 ]
     if not side_observations.empty:
         side_observations.set_index("Target Name", inplace=True)
@@ -601,8 +575,12 @@ def add_rv_status(tl: TargetList, phase_event_defs: list[ph.PhaseEventDef], **kw
         answer.other_lists["PEPSI RV Status"] = pepsi_phases
     return answer
 
+
 def add_tess_sectors(tl: TargetList, **kwargs) -> TargetList:
     from astroquery.mast import Tesscut
+
     coords = SkyCoord(ra=tl.target_list["ra"], dec=tl.target_list["dec"], unit=u.deg)
     answer = tl.copy()
-    answer.target_list["TESS Sectors"] = [", ".join(Tesscut.get_sectors(coordinates=coord)["sector"].astype(str)) for coord in coords]
+    answer.target_list["TESS Sectors"] = [
+        ", ".join(Tesscut.get_sectors(coordinates=coord)["sector"].astype(str)) for coord in coords
+    ]
