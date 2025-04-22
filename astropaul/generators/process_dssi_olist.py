@@ -154,19 +154,19 @@ def determine_dssi_observations(dssi_sequences:Table) -> Table:
     # add a column to the sequences table that indicates observation number
     prev_target = ""
     speckle_session = 0
-    dssi_sequences["Speckle Session"] = 0
+    dssi_sequences["DSSI Session"] = 0
     dssi_sequences.sort("Time JD")
     for sequence in dssi_sequences:
         target_name = sequence["Target Name"]
         if target_name != prev_target:
             speckle_session += 1
             prev_target = target_name
-        sequence["Speckle Session"] = speckle_session
+        sequence["DSSI Session"] = speckle_session
     # group all sequences for a given observation, and summarize them in a new table
     dssi_observations = Table(
         names=[
             "Target Name",
-            "Speckle Session",
+            "DSSI Session",
             "StartTime JD",
             "MidTime JD",
             "EndTime JD",
@@ -177,7 +177,7 @@ def determine_dssi_observations(dssi_sequences:Table) -> Table:
         dtype=[str, str, float, float, float, str, int, str],
     )
 
-    obs_by_session = dssi_sequences.group_by(["Speckle Session", "Target Name", "Wavelengths"])
+    obs_by_session = dssi_sequences.group_by(["DSSI Session", "Target Name", "Wavelengths"])
     for keys, sequences in zip(obs_by_session.groups.keys, obs_by_session.groups):
         start_time = sequences["Time JD"].min()
         end_time = sequences["Time JD"].max()
@@ -186,7 +186,7 @@ def determine_dssi_observations(dssi_sequences:Table) -> Table:
         dssi_observations.add_row(
             (
                 keys["Target Name"],
-                str(keys["Speckle Session"]),
+                str(keys["DSSI Session"]),
                 start_time,
                 mid_time,
                 end_time,
