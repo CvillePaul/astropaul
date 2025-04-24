@@ -115,13 +115,16 @@ class PhaseEventList:
         end: float = float("nan"),
         beg_phase: float = float("nan"),
         end_phase: float = float("nan"),
-        events: list[PhaseEvent] = [],
+        events: list[PhaseEvent] = None,
     ):
         self.beg = beg
         self.end = end
         self.beg_phase = beg_phase
         self.end_phase = end_phase
-        self.events = events
+        if events:
+            self.events = events
+        else:
+            self.events = []
 
     def __repr__(self):
         answer = f"{self.beg} JD to {self.end} JD\n"
