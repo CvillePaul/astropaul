@@ -1,4 +1,5 @@
 import collections
+from functools import partial
 import inspect
 from typing import Any
 
@@ -13,6 +14,7 @@ from astropaul.observing import ObservingSession
 import astropaul.phase as ph
 
 import __main__
+
 
 class TargetList:
     def __init__(
@@ -174,6 +176,7 @@ def add_speckle(tl: TargetList, column_prefix="Speckle ", **kwargs) -> TargetLis
     new_column_names = {column: f"{column_prefix}{column.capitalize()}" for column in speckle.columns}
     speckle.rename(columns=new_column_names, inplace=True)
     speckle[f"{column_prefix}Mid UTC"] = Time(speckle[f"{column_prefix}Mid"], format="jd").iso
+    speckle = speckle.reset_index()
     answer = TargetList.merge(tl, num_speckle, column_groups, {"Speckle Observations": speckle})
     answer.target_list[count_column] = answer.target_list[count_column].fillna(0).astype(int)
     return answer
@@ -262,6 +265,7 @@ def add_ephemerides(tl: TargetList, **kwargs) -> TargetList:
     ephem["Duration (Hours)"] = [f"{duration * 24:.1f}" for duration in ephem["duration"]]  # also convert duration to hours
     new_column_names = {column: column.capitalize() for column in ephem.columns}
     ephem.rename(columns=new_column_names, inplace=True)
+    ephem = ephem.reset_index()
     answer = tl.copy()
     answer.add_other("Ephemerides", ephem)
     return answer
@@ -467,7 +471,7 @@ def filter_targets(
     answer = tl.copy()
     code = inspect.getsource(criteria).strip()
     if (prefix := code.find("criteria=")) > 0:
-        code = code[prefix + 9:] # try to isolate the code of the lambda function passed in
+        code = code[prefix + 9 :]  # try to isolate the code of the lambda function passed in
     for variable in criteria.__code__.co_names:
         if value := __main__.__dict__.get(variable, None):
             code = code.replace(variable, repr(value))
@@ -511,6 +515,68 @@ def add_speckle_phase(tl: TargetList, phase_event_defs: list[ph.PhaseEventDef], 
     return answer
 
 
+def add_system_configuration(
+    tl: TargetList, table_name: str, time_column: str, time_format: str = "jd", **kwargs
+) -> TargetList:
+    """For the specified table, add a pair of columns indicating the state of each system of the target.
+    For these calculations, the specified column gives the time, and must be in the specified format.
+    For a system in eclipse, show what member and the percentage of the time between ingress and egress.
+    For a system not in eclipse, show the percent of phase, where 0.0 is mid eclipse of the a member."""
+    # verify_xxx(tl, {"Ephemerides", table_name})
+    table = tl.other_lists[table_name]
+    for column_name in [time_column, "Target Name"]:
+        if not column_name in table.columns:
+            raise ValueError(f"Table {table_name} does not have a column {column_name}")
+    answer = tl.copy()
+    all_targets = set(table["Target Name"].unique())
+    # determine max number of systems we need to handle, max duration
+    ephem = tl.other_lists["Ephemerides"]
+    ephem = ephem[ephem["Target Name"].isin(all_targets)]
+    systems = sorted(ephem["System"].unique())
+    # add the desired columns to the table
+    phase_event_defs = [
+        ph.PhaseEventDef("Not in Eclipse", partial(ph.calc_time_of_gress, ingress=False)),
+        ph.PhaseEventDef("Eclipse", partial(ph.calc_time_of_gress, ingress=True)),
+    ]
+    system_eclipses, system_durations = {}, {}
+    for system in systems:
+        system_eclipses[system] = []
+        system_durations[system] = []
+    for _, row in table.iterrows():
+        target_name = row["Target Name"]
+        observation_time = Time(row[time_column], format=time_format).jd
+        target_ephem = ephem[ephem["Target Name"] == target_name]
+        for system in systems:
+            system_ephem = target_ephem[target_ephem["System"] == system]
+            if system_ephem.empty:
+                system_eclipses[system].append("")
+                system_durations[system].append(float("nan"))
+                continue
+            eclipse_found = False
+            for _, ephem_row in system_ephem.sort_values("Member").iterrows():
+                member_ephem = ph.Ephemeris.from_dataframe_row(ephem_row)
+                if member_ephem.duration != member_ephem.duration:
+                    continue
+                event_list = ph.PhaseEventList.calc_phase_events(
+                    member_ephem, phase_event_defs, observation_time, observation_time + member_ephem.period
+                )
+                if len(event_list.events) < 2:
+                    raise ValueError(f"Unexpected event list {event_list}")
+                if event_list.events[0].type == "Eclipse":
+                    system_eclipses[system].append(f"{system}{ephem_row["Member"]}")
+                    duration_percent = 1 - (event_list.events[1].jd - observation_time) / member_ephem.duration
+                    system_durations[system].append(duration_percent)
+                    eclipse_found = True
+                    break
+            if not eclipse_found:
+                system_eclipses[system].append("")
+                system_durations[system].append(float("nan"))
+    for system in systems:
+        table[f"System {system} Eclipse"] = system_eclipses[system]
+        table[f"System {system} Duration Percent"] = system_durations[system]
+    answer.other_lists[table_name] = table
+    return answer
+
 def add_side_status(
     tl: TargetList, phase_event_defs: list[ph.PhaseEventDef], side_state: str = "Eclipse", **kwargs
 ) -> TargetList:
@@ -522,7 +588,9 @@ def add_side_status(
         raise ValueError(f"One or more required table missing: {', '.join(required_tables - existing_tables)}")
     answer = tl.copy()
     ephem_table = tl.other_lists["Ephemerides"]
-    side_observations = pd.DataFrame(columns=["Target Name", "Speckle Session", "JD Mid", "UTC Mid", "System", "Member", "SIDE Type"])
+    side_observations = pd.DataFrame(
+        columns=["Target Name", "Speckle Session", "JD Mid", "UTC Mid", "System", "Member", "SIDE Type"]
+    )
     for target_name, speckle in tl.other_lists["Speckle Observations"].iterrows():
         ephem_rows = ephem_table[ephem_table.index == target_name]
         if ephem_rows.empty:
@@ -543,7 +611,7 @@ def add_side_status(
                     Time(speckle["Speckle Mid"], format="jd").iso[:19],
                     ephem_row["System"],
                     ephem_row["Member"],
-                    side_type
+                    side_type,
                 ]
     if not side_observations.empty:
         side_observations.set_index("Target Name", inplace=True)
@@ -599,8 +667,12 @@ def add_rv_status(tl: TargetList, phase_event_defs: list[ph.PhaseEventDef], **kw
         answer.other_lists["PEPSI RV Status"] = pepsi_phases
     return answer
 
+
 def add_tess_sectors(tl: TargetList, **kwargs) -> TargetList:
     from astroquery.mast import Tesscut
+
     coords = SkyCoord(ra=tl.target_list["ra"], dec=tl.target_list["dec"], unit=u.deg)
     answer = tl.copy()
-    answer.target_list["TESS Sectors"] = [", ".join(Tesscut.get_sectors(coordinates=coord)["sector"].astype(str)) for coord in coords]
+    answer.target_list["TESS Sectors"] = [
+        ", ".join(Tesscut.get_sectors(coordinates=coord)["sector"].astype(str)) for coord in coords
+    ]
