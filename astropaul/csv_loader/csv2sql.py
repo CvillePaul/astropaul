@@ -1,19 +1,49 @@
 import argparse
 import configparser
-import os
+from functools import partial
 from pathlib import Path
-import re
+import typing
 
+from astropy.coordinates import Angle
+import astropy.units as u
 import networkx as nx
 import pandas as pd
 import sqlalchemy as sa
+
+ColumnTransformer = typing.Callable[[str, pd.DataFrame, pd.DataFrame], pd.DataFrame]
+
+
+def DefaultColumnTransformer(column_name: str, source: pd.DataFrame, dest: pd.DataFrame) -> pd.DataFrame:
+    dest_column_name = db_style_to_string(column_name)
+    dest[dest_column_name] = source[column_name]
+    return dest
+
+
+def SexagesimalOrDecimalDegreesColumnTransformer(
+    column_name: str, source: pd.DataFrame, dest: pd.DataFrame, hourangle: bool
+) -> pd.DataFrame:
+    if source.empty:
+        raise ValueError("Source DataFrame is empty")
+    dest_column_name = db_style_to_string(column_name)
+    sample_value = source.iloc[0][column_name]
+    if ":" in sample_value:
+        unit = u.hourangle if hourangle else u.deg
+        data = Angle(source[column_name], unit=unit)
+    else:
+        data = Angle(source[column_name], unit=u.deg)
+    dest[dest_column_name] = data.deg
+    dest[f"{dest_column_name} (HMS)"] = data.to_string(decimal=False, sep=":")
+
 
 class TableConfig:
     def __init__(self):
         self.table_name: str = "table"
         self.has_id_column: bool = False
         self.constraints: dict[str, tuple[str, str]] = dict()  # column name: (table name, column name) of foreign table
-        self.column_types: dict[str, object] = dict()
+        self.column_types: dict[str, object] = dict()  # manual column type overrides
+        self.column_transformations: dict[str, ColumnTransformer] = (
+            dict()
+        )  # how to change the csv contents into some other form
 
     def validate_csv_schemas(self, data_files: list[tuple[Path, pd.DataFrame]]):
         reference_file, reference_df = data_files[0]  # Use first file as reference
@@ -28,7 +58,11 @@ class TableConfig:
             for column in reference_df.columns
             if column not in specified_columns
         }
-        self.column_types = {**specified_columns, **inferred_columns}
+        self.column_types = {**inferred_columns, **specified_columns}
+        for column_name, column_type in self.column_types.items():
+            if column_name in self.column_transformations:
+                continue  # don't override manually specified column transformations
+            self.column_transformations[column_name] = DefaultColumnTransformer
         for file_name, data_file in data_files[1:]:  # validate all remaining files against schema we just built
             df_columns = set(data_file.columns)
             if df_columns != all_columns:
@@ -56,17 +90,29 @@ class TableConfig:
             answer.table_name = config.get("options", "table name", fallback=answer.table_name)
             answer.has_id_column = config.getboolean("options", "create id column", fallback=False)
             if config.has_section("columns"):
-                for column, column_type_str in config.items("columns"):
+                for column_name, column_type_str in config.items("columns"):
                     if not (column_type := string_to_column_type(column_type_str)):
                         raise ValueError(f"Unknown column type {column_type_str} in file {config_file}")
-                    answer.column_types[column] = column_type
+                    answer.column_types[column_name] = column_type
             if config.has_section("constraints"):
-                for column, foreign_column in config.items("constraints"):
+                for column_name, foreign_column in config.items("constraints"):
                     parts = foreign_column.split(".")
                     if not parts or len(parts) != 2:
-                        raise ValueError(f"Bad constraint {foreign_column} for column {column} in {config_file}")
+                        raise ValueError(f"Bad constraint {foreign_column} for column {column_name} in {config_file}")
                     foreign_table, foreign_column = parts
-                    answer.constraints[column] = (foreign_table, foreign_column)
+                    answer.constraints[column_name] = (foreign_table, foreign_column)
+            if config.has_section("transformations"):
+                for column_name, transformer_name in config.items("transformations"):
+                    match transformer_name.lower():
+                        case "hms_or_decimal_degrees":
+                            transformer = partial(SexagesimalOrDecimalDegreesColumnTransformer, hourangle=True)
+                        case "dms_or_decimal_degrees":
+                            transformer = partial(SexagesimalOrDecimalDegreesColumnTransformer, hourangle=False)
+                        case _:
+                            raise ValueError(
+                                f"Unknown column transformation {transformer_name} for column {column_name} of {answer.table_name}"
+                            )
+                    answer.column_transformations[column_name] = transformer
         return answer
 
 
