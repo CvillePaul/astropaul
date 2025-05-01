@@ -161,6 +161,15 @@ def string_to_db_style(name: str) -> str:
     return name.lower().replace(" ", "_")
 
 
+def db_style_to_string(name: str) -> str:
+    """Converts a name in database style back to a more pretty, human form"""
+    answer = name.replace("_", " ")
+    answer = answer.title()
+    for string in ["Jd", "Utc", "Id", "Dssi", "Ra", "Hms", "Dms"]:
+        answer = answer.replace(string, string.upper())
+    return answer
+
+
 def create_table(metadata, table_config: TableConfig) -> int:
     table_columns = []
     if table_config.has_id_column:
