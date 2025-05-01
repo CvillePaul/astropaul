@@ -178,7 +178,7 @@ def add_dssi(tl: TargetList, **kwargs) -> TargetList:
     # add to the target list a column indicating the number of dssi observations for each target
     count_column = "Num DSSI"
     dssi_counts = dssi_observations["Target Name"].value_counts()
-    answer.target_list[count_column] = dssi_counts
+    answer.target_list[count_column] = answer.target_list["Target Name"].map(dssi_counts)
     answer.target_list[count_column] = answer.target_list[count_column].fillna(0).astype(int)
     primary_columns, secondary_columns = answer.column_groups.get("Count", ([], []))
     primary_columns.append(count_column)
@@ -198,8 +198,8 @@ def add_pepsi(tl: TargetList, **kwargs) -> TargetList:
 
     # add to the target list a column indicating the number of dssi observations for each target
     count_column = "Num PEPSI"
-    dssi_counts = pepsi_observations["Target Name"].value_counts()
-    answer.target_list[count_column] = dssi_counts
+    pepsi_counts = pepsi_observations["Target Name"].value_counts()
+    answer.target_list[count_column] = answer.target_list["Target Name"].map(pepsi_counts)
     answer.target_list[count_column] = answer.target_list[count_column].fillna(0).astype(int)
     primary_columns, secondary_columns = answer.column_groups.get("Count", ([], []))
     primary_columns.append(count_column)
@@ -443,7 +443,6 @@ def filter_targets(
     code = inspect.getsource(criteria).strip()
     if (prefix := code.find("criteria=")) > 0:
         code = code[prefix + 9 :]  # try to isolate the code of the lambda function passed in
-        code = code[prefix + 9 :]  # try to isolate the code of the lambda function passed in
     for variable in criteria.__code__.co_names:
         if value := __main__.__dict__.get(variable, None):
             code = code.replace(variable, repr(value))
@@ -467,15 +466,15 @@ def add_dssi_phase(tl: TargetList, phase_event_defs: list[ph.PhaseEventDef], **k
         ephem_rows = ephem_table[ephem_table["Target Name"] == target_name]
         if ephem_rows.empty:
             continue
-        beg, end = dssi["Starttime JD"], dssi["Endtime JD"]
+        beg, end = dssi["Start JD"], dssi["End JD"]
         for _, ephem_row in ephem_rows.sort_values(["System", "Member"]).iterrows():
             ephem = ph.Ephemeris.from_dataframe_row(ephem_row)
             state = ph.PhaseEventList.calc_phase_events(ephem, phase_event_defs, beg, end).calc_longest_span(beg, end)
             dssi_phases.loc[len(dssi_phases)] = [
                 target_name,
                 int(dssi["DSSI Session"]),
-                dssi["Midtime JD"],
-                dssi["Midtime UTC"],
+                dssi["Mid JD"],
+                dssi["Mid UTC"],
                 ephem_row["System"],
                 ephem_row["Member"],
                 state,
@@ -555,13 +554,13 @@ def add_side_status(
     answer = tl.copy()
     ephem_table = tl.other_lists["Ephemerides"]
     side_observations = pd.DataFrame(
-        columns=["Target Name", "DSSI Session", "Midtime JD", "Midtime UTC", "System", "Member", "SIDE Type"]
+        columns=["Target Name", "DSSI Session", "Mid JD", "Mid UTC", "System", "Member", "SIDE Type"]
     )
     for target_name, dssi in tl.other_lists["DSSI Observations"].iterrows():
         ephem_rows = ephem_table[ephem_table["Target Name"] == target_name]
         if ephem_rows.empty:
             continue
-        beg, end = dssi["Starttime JD"], dssi["Endtime JD"]
+        beg, end = dssi["Start JD"], dssi["End JD"]
         for _, ephem_row in ephem_rows.sort_values(["System", "Member"]).iterrows():
             ephem = ph.Ephemeris.from_dataframe_row(ephem_row)
             state = ph.PhaseEventList.calc_phase_events(ephem, phase_event_defs, beg, end).calc_longest_span(beg, end)
@@ -573,8 +572,8 @@ def add_side_status(
                 side_observations.loc[len(side_observations)] = [
                     target_name,
                     int(dssi["DSSI Session"]),
-                    dssi["Midtime JD"],
-                    dssi["Midtime UTC"],
+                    dssi["Mid JD"],
+                    dssi["Mid UTC"],
                     ephem_row["System"],
                     ephem_row["Member"],
                     side_type,
@@ -594,19 +593,18 @@ def add_rv_status(tl: TargetList, phase_event_defs: list[ph.PhaseEventDef], **kw
     The status of each system is determined by the status of its first component with non-nan ephemeris values.
     These system statuses are then concatenated, separated by '|' characters, to get the final status for the target.
     """
-    required_tables = {"PEPSI", "Ephemerides"}
-    existing_tables = set(tl.other_lists.keys())
-    if not existing_tables.issuperset(required_tables):
-        raise ValueError(f"One or more required table missing: {', '.join(required_tables - existing_tables)}")
+    verify_step_requirements(tl, {"PEPSI Observations", "Ephemerides"})
     answer = tl.copy()
     ephem_table = tl.other_lists["Ephemerides"]
-    pepsi_phases = pd.DataFrame(columns=["Target Name", "PEPSI ID", "Start JD", "Start UTC", "State"])
-    for target_name, pepsi in tl.other_lists["PEPSI"].iterrows():
-        ephem_rows = ephem_table[ephem_table["Target Name"] == target_name]
+    pepsi_table = tl.other_lists["PEPSI Observations"]
+    pepsi_phases = pd.DataFrame(columns=["Target Name", "Start JD", "Start UTC", "State"])
+    for _, pepsi in pepsi_table.iterrows():
+        ephem_rows = ephem_table[ephem_table["Target Name"] == pepsi["Target Name"]]
         if ephem_rows.empty:
             continue
-        beg = pepsi["Start JD"]
-        end = beg + pepsi["Exposure Time"] / 24 / 3600  # exposure time is in seconds instead of days
+        exposure_days = pepsi["Exposure Time"] / 24 / 3600  # exposure time is in seconds instead of days
+        beg = pepsi["Mid JD"] - exposure_days / 2
+        end = beg + exposure_days
         system_states = []
         for _, system_ephems in ephem_rows.groupby("System"):
             system_state = None
@@ -623,10 +621,9 @@ def add_rv_status(tl: TargetList, phase_event_defs: list[ph.PhaseEventDef], **kw
                 system_states.append("?")
 
         pepsi_phases.loc[len(pepsi_phases)] = [
-            target_name,
-            int(pepsi["PEPSI ID"]),
-            pepsi["Start JD"],
-            pepsi["Start UTC"][:18],
+            pepsi["Target Name"],
+            beg,
+            Time(beg, format="jd").iso[:18],
             "|".join(system_states),
         ]
     if not pepsi_phases.empty:
@@ -646,3 +643,12 @@ def add_tess_sectors(tl: TargetList, **kwargs) -> TargetList:
     answer.target_list["TESS Sectors"] = [
         ", ".join(Tesscut.get_sectors(coordinates=coord)["sector"].astype(str)) for coord in coords
     ]
+
+def add_catalogs(tl: TargetList, **kwargs) -> TargetList:
+    answer = tl.copy()
+    all_targets = list(tl.target_list["Target Name"].unique())
+    catalog_members = pd.read_sql("select target_name, catalog_name, catalog_id from catalog_members;", kwargs["connection"])
+    convert_columns_to_human_style(catalog_members)
+    catalog_members = catalog_members[catalog_members["Target Name"].isin(all_targets)]
+    answer.other_lists["Catalog Membership"] = catalog_members
+    return answer
