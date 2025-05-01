@@ -18,7 +18,6 @@ import astropaul.phase as ph
 import __main__
 
 
-
 class TargetList:
     def __init__(
         self,
@@ -151,7 +150,6 @@ def add_targets(tl: TargetList = TargetList(), **kwargs) -> TargetList:
     targets = pd.read_sql(
         "select * from targets;",
         kwargs["connection"],
-        index_col="target_name",
     )
     convert_columns_to_human_style(targets)
     column_groups = {"Target": (["Target Name"], [column for column in targets.columns if column != "Target Name"])}
@@ -171,7 +169,7 @@ def add_dssi(tl: TargetList, **kwargs) -> TargetList:
     verify_step_requirements(tl)
     answer = tl.copy()
     # add a table of all dssi observations
-    all_targets = list(tl.target_list.index)
+    all_targets = list(tl.target_list["Target Name"].unique())
     dssi_observations = pd.read_sql("select * from dssi_observations;", kwargs["connection"])
     dssi_observations = dssi_observations[dssi_observations["target_name"].isin(all_targets)]
     convert_columns_to_human_style(dssi_observations)
@@ -192,7 +190,7 @@ def add_pepsi(tl: TargetList, **kwargs) -> TargetList:
     verify_step_requirements(tl)
     answer = tl.copy()
     # add a table of all pepsi observations
-    all_targets = list(tl.target_list.index)
+    all_targets = list(tl.target_list["Target Name"].unique())
     pepsi_observations = pd.read_sql("select * from pepsi_spectra;", kwargs["connection"])
     pepsi_observations = pepsi_observations[pepsi_observations["target_name"].isin(all_targets)]
     convert_columns_to_human_style(pepsi_observations)
@@ -227,17 +225,17 @@ def add_lists(tl: TargetList, **kwargs) -> TargetList:
             ).fetchall()
         ]
         column_name = f"List {target_list}"
-        answer.target_list[column_name] = answer.target_list.index.isin(list_members)
+        answer.target_list[column_name] = answer.target_list["Target Name"].isin(list_members)
     answer.column_groups["List"] = ([], [f"List {name}" for name in target_lists])
     return answer
 
 
 def add_ephemerides(tl: TargetList, **kwargs) -> TargetList:
     verify_step_requirements(tl)
-    ephem = pd.read_sql("select * from ephemerides;", kwargs["connection"], index_col="target_name")
-    all_targets = list(tl.target_list.index)
-    ephem = ephem[ephem.index.isin(all_targets)]
+    ephem = pd.read_sql("select * from ephemerides;", kwargs["connection"])
+    all_targets = list(tl.target_list["Target Name"].unique())
     convert_columns_to_human_style(ephem)
+    ephem = ephem[ephem["Target Name"].isin(all_targets)]
     ephem["Duration (Hours)"] = ephem["Duration"]
     ephem["Duration"] = [duration / 24 for duration in ephem["Duration (Hours)"]]  # also convert duration to hours
     answer = tl.copy()
@@ -294,7 +292,6 @@ def add_tess(tl: TargetList, column_prefix="TESS ", **kwargs) -> TargetList:
         where ca.association = 'Primary ID' and ca.catalog = 'TESS TICv8'
         """,
         kwargs["connection"],
-        index_col="target_id",
     )
     tess.drop("id", axis=1, inplace=True)
     new_column_names = {column: f"{column_prefix}{column}" for column in tess.columns}
@@ -361,7 +358,7 @@ def add_observability(
         constraints = [
             ap.AltitudeConstraint(lo_alt, hi_alt, True),
         ]
-    coords = SkyCoord(ra=tl.target_list["ra"].values * u.deg, dec=tl.target_list["dec"].values * u.deg)
+    coords = SkyCoord(ra=tl.target_list["RA"].values * u.deg, dec=tl.target_list["Dec"].values * u.deg)
 
     # calculate observability for each time segment of the observing session
     answer = tl.copy()
@@ -460,31 +457,31 @@ def filter_targets(
 
 
 def add_dssi_phase(tl: TargetList, phase_event_defs: list[ph.PhaseEventDef], **kwargs) -> TargetList:
-    """Calculate what PhaseEventDef was most in effect during a speckle observation"""
+    """Calculate what PhaseEventDef was most in effect during a DSSI observation"""
     verify_step_requirements(tl, {"DSSI Observations", "Ephemerides"})
     answer = tl.copy()
     ephem_table = tl.other_lists["Ephemerides"]
-    speckle_phases = pd.DataFrame(columns=["Target Name", "DSSI Session", "JD Mid", "UTC Mid", "System", "Member", "State"])
-    for _, speckle in tl.other_lists["DSSI Observations"].iterrows():
-        target_name = speckle["Target Name"]
-        ephem_rows = ephem_table[ephem_table.index == target_name]
+    dssi_phases = pd.DataFrame(columns=["Target Name", "DSSI Session", "JD Mid", "UTC Mid", "System", "Member", "State"])
+    for _, dssi in tl.other_lists["DSSI Observations"].iterrows():
+        target_name = dssi["Target Name"]
+        ephem_rows = ephem_table[ephem_table["Target Name"] == target_name]
         if ephem_rows.empty:
             continue
-        beg, end = speckle["Starttime JD"], speckle["Endtime JD"]
+        beg, end = dssi["Starttime JD"], dssi["Endtime JD"]
         for _, ephem_row in ephem_rows.sort_values(["System", "Member"]).iterrows():
             ephem = ph.Ephemeris.from_dataframe_row(ephem_row)
             state = ph.PhaseEventList.calc_phase_events(ephem, phase_event_defs, beg, end).calc_longest_span(beg, end)
-            speckle_phases.loc[len(speckle_phases)] = [
+            dssi_phases.loc[len(dssi_phases)] = [
                 target_name,
-                int(speckle["DSSI Session"]),
-                speckle["Midtime JD"],
-                speckle["Midtime UTC"],
+                int(dssi["DSSI Session"]),
+                dssi["Midtime JD"],
+                dssi["Midtime UTC"],
                 ephem_row["System"],
                 ephem_row["Member"],
                 state,
             ]
-    if not speckle_phases.empty:
-        answer.other_lists["DSSI Phases"] = speckle_phases
+    if not dssi_phases.empty:
+        answer.other_lists["DSSI Phases"] = dssi_phases
     return answer
 
 
@@ -495,11 +492,10 @@ def add_system_configuration(
     For these calculations, the specified column gives the time, and must be in the specified format.
     For a system in eclipse, show what member and the percentage of the time between ingress and egress.
     For a system not in eclipse, show the percent of phase, where 0.0 is mid eclipse of the a member."""
-    # verify_xxx(tl, {"Ephemerides", table_name})
+    verify_step_requirements(tl, {table_name})
     table = tl.other_lists[table_name]
-    for column_name in [time_column, "Target Name"]:
-        if not column_name in table.columns:
-            raise ValueError(f"Table {table_name} does not have a column {column_name}")
+    if not time_column in table.columns:
+        raise ValueError(f"Table {table_name} does not have a column {time_column}")
     answer = tl.copy()
     all_targets = set(table["Target Name"].unique())
     # determine max number of systems we need to handle, max duration
@@ -555,23 +551,17 @@ def add_side_status(
 ) -> TargetList:
     """Examine all speckle observations and determine which ones occurred during eclipse.
     `side_state` specifies the name returned by one or more `phase_event_defs` that indicate an eclipse."""
-    required_tables = {"Ephemerides", "Speckle Observations"}
-    existing_tables = set(tl.other_lists.keys())
-    if not existing_tables.issuperset(required_tables):
-        raise ValueError(f"One or more required table missing: {', '.join(required_tables - existing_tables)}")
+    verify_step_requirements(tl, {"Ephemerides", "DSSI Observations"})
     answer = tl.copy()
     ephem_table = tl.other_lists["Ephemerides"]
     side_observations = pd.DataFrame(
-        columns=["Target Name", "Speckle Session", "JD Mid", "UTC Mid", "System", "Member", "SIDE Type"]
+        columns=["Target Name", "DSSI Session", "Midtime JD", "Midtime UTC", "System", "Member", "SIDE Type"]
     )
-    side_observations = pd.DataFrame(
-        columns=["Target Name", "Speckle Session", "JD Mid", "UTC Mid", "System", "Member", "SIDE Type"]
-    )
-    for target_name, speckle in tl.other_lists["Speckle Observations"].iterrows():
-        ephem_rows = ephem_table[ephem_table.index == target_name]
+    for target_name, dssi in tl.other_lists["DSSI Observations"].iterrows():
+        ephem_rows = ephem_table[ephem_table["Target Name"] == target_name]
         if ephem_rows.empty:
             continue
-        beg, end = speckle["Speckle Start"], speckle["Speckle End"]
+        beg, end = dssi["Starttime JD"], dssi["Endtime JD"]
         for _, ephem_row in ephem_rows.sort_values(["System", "Member"]).iterrows():
             ephem = ph.Ephemeris.from_dataframe_row(ephem_row)
             state = ph.PhaseEventList.calc_phase_events(ephem, phase_event_defs, beg, end).calc_longest_span(beg, end)
@@ -582,16 +572,15 @@ def add_side_status(
                     side_type = "Synthetic Duration"
                 side_observations.loc[len(side_observations)] = [
                     target_name,
-                    int(speckle["Speckle Session"]),
-                    speckle["Speckle Mid"],
-                    Time(speckle["Speckle Mid"], format="jd").iso[:19],
+                    int(dssi["DSSI Session"]),
+                    dssi["Midtime JD"],
+                    dssi["Midtime UTC"],
                     ephem_row["System"],
                     ephem_row["Member"],
                     side_type,
                     side_type,
                 ]
     if not side_observations.empty:
-        side_observations.set_index("Target Name", inplace=True)
         answer.other_lists["SIDE Observations"] = side_observations.sort_values(["Target Name", "System", "Member", "JD Mid"])
         side_counts = side_observations.groupby("Target Name").size()
         side_counts.name = "Num SIDE"
@@ -613,7 +602,7 @@ def add_rv_status(tl: TargetList, phase_event_defs: list[ph.PhaseEventDef], **kw
     ephem_table = tl.other_lists["Ephemerides"]
     pepsi_phases = pd.DataFrame(columns=["Target Name", "PEPSI ID", "Start JD", "Start UTC", "State"])
     for target_name, pepsi in tl.other_lists["PEPSI"].iterrows():
-        ephem_rows = ephem_table[ephem_table.index == target_name]
+        ephem_rows = ephem_table[ephem_table["Target Name"] == target_name]
         if ephem_rows.empty:
             continue
         beg = pepsi["Start JD"]
@@ -643,7 +632,6 @@ def add_rv_status(tl: TargetList, phase_event_defs: list[ph.PhaseEventDef], **kw
     if not pepsi_phases.empty:
         answer.other_lists["PEPSI RV Status"] = pepsi_phases
     return answer
-
 
 
 def add_tess_sectors(tl: TargetList, **kwargs) -> TargetList:
