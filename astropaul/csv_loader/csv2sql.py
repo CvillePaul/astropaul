@@ -95,14 +95,22 @@ class TableConfig:
         self.has_id_column = False
         self.transformations = []
         self.constraints = {}  # key is dependent column, value is foreign (table, column)
+        self.constraint_options = set()
         specified_transformations = {}  # key is frozen set of input columns, value is transformation class
         if config_file.exists():
             config = configparser.ConfigParser()
             config.optionxform = str  # don't convert keys to lower case
             config.read(config_file)
+            # process table-wide options
             if specified_name := config.get("options", "table name", fallback=None):
                 self.table_name = string_to_db_style(specified_name)
             self.has_id_column = config.getboolean("options", "create id column", fallback=False)
+            all_constraint_options = {"log", "skip"}
+            constraint_policy = config.get("options", "constraint policy", fallback=None)
+            if constraint_policy:
+                self.constraint_options = set([option.lower().strip() for option in constraint_policy.split(",")])
+                if len(self.constraint_options) > 0 and not self.constraint_options.issubset(all_constraint_options):
+                    raise ValueError(f"Constraint policy in {config_file} must be subset of: {all_constraint_options}")
             # process things that determine column order, transformations, type
             unspecified_columns = set(example_data.columns)
             if config.has_section("columns"):
@@ -212,12 +220,21 @@ def insert_csv_data(
     for file_name, df_from_csv in data_files:
         # verify constrained columns have allowed values
         for child_column in table_config.constraints.keys():
+            constraint_violations = []
             valid_column_values = validation_values[child_column]
             for value in df_from_csv[child_column].unique():
                 if not value in valid_column_values:
-                    raise ValueError(
-                        f"In file {file_name} for table {table_config.table_name}, value {value} not found in {source_table_name}.{source_column}"
-                    )
+                    constraint_violations.append(value)
+            if len(constraint_violations) == 0:
+                continue
+            message = f"In file {file_name}, column {child_column} contains invalid values {constraint_violations}"
+            if "log" in table_config.constraint_options:
+                print(message)
+            if "skip" in table_config.constraint_options:
+                violation_mask = df_from_csv[child_column].isin(constraint_violations)
+                df_from_csv = df_from_csv[~violation_mask]
+            else:
+                raise ValueError(message)
         # now build the DataFrame we'll convert to sql
         df_for_sql = pd.DataFrame()
         for transformation in table_config.transformations:
