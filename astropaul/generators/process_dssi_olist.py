@@ -34,6 +34,65 @@ def find_observation_lines(lines: list[str]) -> tuple[list[str], list[str]]:
     return observation_lines, non_observation_lines
 
 
+observation_line_patterns = [
+    (
+        "Standard Pattern",
+        r"""(?x)
+            (?P<target_name>.{7,13})\s+
+            (?P<image_num>\d{1,3})\s+
+            (?P<hours>\d\d):(?P<minutes>\d\d)\s+
+            (?P<gain_1>\d{1,3})\s+
+            (?P<gain_2>\d{1,3})\s+
+            (?P<ra>\d\d:\d\d:\d\d\.\d+)\s+
+            (?P<dec>[+|-]{0,1}\d\d:\d\d:\d\d\.\d+)\s+
+            (?P<pmra>[0-9.+-]*)\s+
+            (?P<pmdec>[0-9.+-]*)\s+
+            (?P<mag>[0-9.-]+)\s*
+            (?P<notes>.*)""",
+    ),
+    # (
+    #     "No Image Num, Gains, or Time",
+    #     r"""(?x)
+    #         (?P<target_name>\"{0,1}.{7,13}\"{0,1})\s+
+    #         (?P<ra>\d\d:\d\d:\d\d\.\d+)\s+
+    #         (?P<dec>[+|-]{0,1}\d\d:\d\d:\d\d\.\d+)\s+
+    #         (?P<pmra>[0-9.+-]*)\s+
+    #         (?P<pmdec>[0-9.+-]*)\s+
+    #         (?P<mag>[0-9.-]+)\s*
+    #         (?P<notes>.*)""",
+    # ),
+    (
+        "Infrared Observations",
+        r"""(?x)
+            (?P<target_name>.{7})\s+
+            (?P<image_beg>\d{1,3})-(?P<image_end>\d{1,3})\s+
+            (?P<image_ir>\d{1,3})\s+
+            (?P<hours>\d\d):(?P<minutes>\d\d)\s+
+            (?P<gain>\d{1,3})\s+
+            (?P<ra>\d\d:\d\d:\d\d\.\d+)\s+
+            (?P<dec>[+|-]{0,1}\d\d:\d\d:\d\d\.\d+)\s+
+            (?P<pmra>[0-9\.+-]*)\s+
+            (?P<pmdec>[0-9\.+-]*)\s+
+            (?P<mag>[0-9\.]+)\s*
+            (?P<notes>.*)""",
+    ),
+    (
+        "Single Gain Value",
+        r"""(?x)
+            (?P<target_name>.{7,15})\s+
+            (?P<image_num>\d{1,4})\s+
+            (?P<gain>\d{1,3})\s+
+            (?P<hours>\d\d):(?P<minutes>\d\d)\s+
+            (?P<ra>\d\d:\d\d:\d\d\.\d+)\s+
+            (?P<dec>[+|-]{0,1}\d\d:\d\d:\d\d\.\d+)\s+
+            (?P<pmra>[0-9\.+-]*)\s+
+            (?P<pmdec>[0-9\.+-]*)\s+
+            (?P<mag>[0-9\.]+)\s*
+            (?P<notes>.*)""",
+    ),
+]
+
+
 def process_observation_lines(observation_lines: list[str], utc_date: datetime) -> tuple[Table, Counter, list[str]]:
     """Extract data from observation line, return Table of observations, count of types of line, and failed lines."""
 
@@ -75,29 +134,10 @@ def process_observation_lines(observation_lines: list[str], utc_date: datetime) 
 
     for line_num, line in enumerate(observation_lines):
         fields = {}
-        if match := re.match(
-            r"(?P<target_name>.{7,13})\s+(?P<image_num>\d{1,3})\s+(?P<hours>\d\d):(?P<minutes>\d\d)\s+(?P<gain_1>\d{1,3})\s+(?P<gain_2>\d{1,3})\s+(?P<ra>\d\d:\d\d:\d\d\.\d+)\s+(?P<dec>[+|-]{0,1}\d\d:\d\d:\d\d\.\d+)\s+(?P<pmra>[0-9.+-]*)\s+(?P<pmdec>[0-9.+-]*)\s+(?P<mag>[0-9.-]+)\s*(?P<notes>.*)",
-            line,
-        ):
-            observation_types.update(["Standard Pattern"])
-        elif match := re.match(
-            r"(?P<target_name>\"{0,1}.{7,13}\"{0,1})\s+(?P<ra>\d\d:\d\d:\d\d\.\d+)\s+(?P<dec>[+|-]{0,1}\d\d:\d\d:\d\d\.\d+)\s+(?P<pmra>[0-9.+-]*)\s+(?P<pmdec>[0-9.+-]*)\s+(?P<mag>[0-9.-]+)\s*(?P<notes>.*)",
-            line,
-        ):
-            observation_types.update(["No Image Num, Gains, or Time"])
-            # fields["image_num"] = 0
-            # fields["gain"] = 0
-            continue  # per Jimmy, these were possible targets that never resulted in an actual observation
-        elif match := re.match(
-            r"(?P<target_name>.{7})\s+(?P<image_beg>\d{1,3})-(?P<image_end>\d{1,3})\s+(?P<image_ir>\d{1,3})\s+(?P<hours>\d\d):(?P<minutes>\d\d)\s+(?P<gain>\d{1,3})\s+(?P<ra>\d\d:\d\d:\d\d\.\d+)\s+(?P<dec>[+|-]{0,1}\d\d:\d\d:\d\d\.\d+)\s+(?P<pmra>[0-9\.+-]*)\s+(?P<pmdec>[0-9\.+-]*)\s+(?P<mag>[0-9\.]+)\s*(?P<notes>.*)",
-            line,
-        ):
-            observation_types.update(["Infrared Observations"])
-        elif match := re.match(
-            r"(?P<target_name>.{7,15})\s+(?P<image_num>\d{1,4})\s+(?P<gain>\d{1,3})\s+(?P<hours>\d\d):(?P<minutes>\d\d)\s+(?P<ra>\d\d:\d\d:\d\d\.\d+)\s+(?P<dec>[+|-]{0,1}\d\d:\d\d:\d\d\.\d+)\s+(?P<pmra>[0-9\.+-]*)\s+(?P<pmdec>[0-9\.+-]*)\s+(?P<mag>[0-9\.]+)\s*(?P<notes>.*)",
-            line,
-        ):
-            observation_types.update(["Single Gain Value"])
+        for pattern_name, regex_pattern in observation_line_patterns:
+            if match := re.match(regex_pattern, line):
+                observation_types.update(pattern_name)
+                break
         if match:
             fields = {**match.groupdict(), **fields}
             try:
@@ -150,7 +190,8 @@ def process_observation_lines(observation_lines: list[str], utc_date: datetime) 
             failed_lines.append(f"{line_num:4d}: {line.strip()}")
     return dssi_sequences, observation_types, failed_lines
 
-def determine_dssi_observations(dssi_sequences:Table) -> Table:
+
+def determine_dssi_observations(dssi_sequences: Table) -> Table:
     # add a column to the sequences table that indicates observation number
     prev_target = ""
     speckle_session = 0
@@ -198,6 +239,7 @@ def determine_dssi_observations(dssi_sequences:Table) -> Table:
 
     return dssi_observations
 
+
 def parse_olist_file(file: str) -> tuple[datetime, Table, Counter, list[str], list[str]]:
     observing_date, contents = get_file_contents(file)
     observation_lines, non_observation_lines = find_observation_lines(contents)
@@ -212,7 +254,6 @@ def parse_olist_file(file: str) -> tuple[datetime, Table, Counter, list[str], li
 def parse_olist_files(files: list[str], out_dir: str = ".", verbose: bool = False) -> None:
     overall_observation_types = Counter()
     overall_failed_lines = {}
-    # csv_extension = re.compile("olist", re.IGNORECASE)
     for file_pattern in files:
         for specific_file in glob(file_pattern):
             observation_date, dssi_observations, observation_types, failed_lines, _ = parse_olist_file(specific_file)
@@ -221,7 +262,6 @@ def parse_olist_files(files: list[str], out_dir: str = ".", verbose: bool = Fals
                     print(f"{0:4d} sequences, {len(failed_lines):4d} failed lines from {specific_file}")
                 continue
             sequence_file = f"DSSI Observations {observation_date:%Y-%m-%d}.csv"
-            # sequence_file = csv_extension.sub("csv", os.path.basename(sequence_file))
             sequence_file = os.path.join(out_dir, sequence_file)
             dssi_observations.write(sequence_file, overwrite=True)
             overall_observation_types += observation_types
