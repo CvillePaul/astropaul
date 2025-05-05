@@ -19,8 +19,7 @@ class DataTransformation:
         return [(column_name, sa.String) for column_name in self.example_data.columns]
 
     def do_transformation(self, source: pd.DataFrame, dest: pd.DataFrame) -> pd.DataFrame:
-        for column_name in self.example_data.columns:
-            dest[column_name] = source[column_name]
+        dest = pd.concat([dest, source[self.example_data.columns]], axis=1)
         return dest
 
 
