@@ -64,12 +64,15 @@ class CoordinateDataTransformation(DataTransformation):
         self.dec_sexagesimal = self.dec_decimal + "_dms"
 
     @staticmethod
-    def _get_angle_from_string(input: str, unit) -> Angle:
-        if ":" in input:
-            answer = Angle(input, unit=unit)
-        else:
-            answer = Angle(input, unit=u.deg)
-        return answer
+    def _get_angle_from_string(input: list[str], unit) -> Angle:
+        angles = []
+        for item in input:
+            if ":" in item:
+                angle = Angle(item, unit=unit)
+            else:
+                angle = Angle(item, unit=u.deg)
+            angles.append(angle)
+        return Angle(angles)
 
     def get_sql_columns(self):
         return [
@@ -80,7 +83,7 @@ class CoordinateDataTransformation(DataTransformation):
         ]
 
     def do_transformation(self, source, dest):
-        ra_angle = CoordinateDataTransformation._get_angle_from_string(source[self.ra_decimal], unit=u.hourangle)
+        ra_angle = CoordinateDataTransformation._get_angle_from_string(list(source[self.ra_decimal]), unit=u.hourangle)
         dec_angle = CoordinateDataTransformation._get_angle_from_string(source[self.dec_decimal], unit=u.deg)
         dest[self.ra_decimal] = ra_angle.deg
         dest[self.dec_decimal] = dec_angle.deg
