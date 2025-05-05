@@ -646,8 +646,21 @@ def add_tess_sectors(tl: TargetList, **kwargs) -> TargetList:
 
 def add_catalogs(tl: TargetList, **kwargs) -> TargetList:
     answer = tl.copy()
+    conn = kwargs["connection"]
     all_targets = list(tl.target_list["Target Name"].unique())
-    catalog_members = pd.read_sql("select target_name, catalog_name, catalog_id from catalog_members;", kwargs["connection"])
+    catalog_members = pd.read_sql("select target_name, catalog_name, catalog_id from catalog_members;", conn)
+    tess_catalog_ids = pd.read_sql(
+        """
+        select cm.target_name, tt.gaia 'GAIA DR2', hip, twomass
+        from catalog_members cm
+        join tess_ticv8 tt on tt.id = cm.catalog_id
+        where cm.catalog_name = 'TESS TICv8';
+   
+    """,
+        conn,
+    )
+    catalog_members_from_tess = tess_catalog_ids.melt(id_vars="target_name", var_name="catalog_name", value_name="catalog_id")
+    catalog_members = pd.concat([catalog_members, catalog_members_from_tess], ignore_index=True)
     convert_columns_to_human_style(catalog_members)
     catalog_members = catalog_members[catalog_members["Target Name"].isin(all_targets)]
     answer.other_lists["Catalog Membership"] = catalog_members
