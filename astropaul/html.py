@@ -217,7 +217,7 @@ def render_observing_pages(tl: tlc.TargetList, pl: pr.PriorityList, other_files:
             f"Created {datetime.now().astimezone().isoformat(sep=" ", timespec="seconds")} on {platform.node()}",
             style="text-align: left; font-style: italic;",
         )
-        
+
         with open(f"{dir}/index.html", "w") as f:
             f.write(d.render())
 
@@ -445,7 +445,10 @@ def render_observing_pages(tl: tlc.TargetList, pl: pr.PriorityList, other_files:
                     f.write(d.render())
 
     # make pages for each individual target
-    columns = ["RA", "Dec", "Vmag", "Teff", "ra", "dec"]
+    desired_columns = ["RA", "Dec", "RA HMS", "Dec DMS", "Vmag", "Teff"]
+    columns = [item for item in desired_columns if item in tl.target_list.columns]
+    # list({"RA", "Dec", "RA HMS", "Dec DMS", "Vmag", "Teff", "asdf"} & set(tl.target_list.columns))
+
     for _, row in tl.target_list.iterrows():
         target_name = row["Target Name"]
         with dominate.document(title=target_name) as d:
