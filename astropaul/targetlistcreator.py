@@ -283,54 +283,18 @@ def add_phase_events(
     return answer
 
 
-def add_tess(tl: TargetList, column_prefix="TESS ", **kwargs) -> TargetList:
-    tess = pd.read_sql(
-        """
-        select ca.target_id, tt.*
-        from tom_tess_ticv8 tt
-        join tom_catalogassociation ca on ca.catalog_id = tt.Identifier
-        where ca.association = 'Primary ID' and ca.catalog = 'TESS TICv8'
-        """,
+def ancillary_data_from_tess(tl: TargetList, **kwargs) -> TargetList:
+    """Add fundamental things like magnitude and effective temperature if available from TESS catalog"""
+    answer = tl.copy()
+    tess_data = pd.read_sql(
+        """select 'TIC ' || id 'Target Name', pmra 'PM RA', pmdec 'PM Dec', vmag Vmag, teff Teff, plx Parallax, d Distance
+        from tess_ticv8 tt;""",
         kwargs["connection"],
     )
-    tess.drop("id", axis=1, inplace=True)
-    new_column_names = {column: f"{column_prefix}{column}" for column in tess.columns}
-    tess.rename(columns=new_column_names, inplace=True)
-    objId_column = f"{column_prefix}objID"
-    columns = list(new_column_names.values())
-    columns.remove(objId_column)
-    column_groups = {column_prefix: ([objId_column], columns)}
-    return TargetList.merge(tl, tess, column_groups, {})
-
-
-def add_coords(tl: TargetList, **kwargs) -> TargetList:
-    """Add fundamental things like coordinates if available from catalog data"""
-    # TODO: remove hard coded column prefix from this dictionary
-    tess_mapping = {
-        "ra": "TESS ra",
-        "dec": "TESS dec",
-        "pmra": "TESS pmRA",
-        "pmdec": "TESS pmDEC",
-        "parallax": "TESS plx",
-        "Vmag": "TESS Vmag",
-        "Teff": "TESS Teff",
-    }
-    answer = tl.copy()
-    if "TESS version" in answer.target_list.columns:
-        for field, tess_field in tess_mapping.items():
-            answer.target_list[field] = answer.target_list[tess_field]
-    # add sexagesimal versions of the coordinates for convenience
-    answer.target_list["RA"] = [
-        Angle(ra, unit=u.deg).to_string(unit=u.hour, decimal=False, precision=2, sep=":", pad=True)
-        for ra in answer.target_list["ra"]
-    ]
-    answer.target_list["Dec"] = [
-        Angle(dec, unit=u.deg).to_string(unit=u.deg, decimal=False, precision=2, sep=":", alwayssign=True, pad=True)
-        for dec in answer.target_list["dec"]
-    ]
+    answer.target_list = answer.target_list.merge(tess_data, on="Target Name", how="left")
     answer.column_groups = {
         **answer.column_groups,
-        "Coordinates": (["RA", "Dec", "ra", "dec", "Vmag", "Teff"], ["pmra", "pmdec", "parallax"]),
+        "TESS Data": (["Vmag", "Teff"], ["PM RA", "PM Dec", "Distance", "Parallax"]),
     }
     return answer
 
@@ -545,6 +509,7 @@ def add_system_configuration(
     answer.other_lists[table_name] = table
     return answer
 
+
 def add_side_status(
     tl: TargetList, phase_event_defs: list[ph.PhaseEventDef], side_state: str = "Eclipse", **kwargs
 ) -> TargetList:
@@ -634,7 +599,6 @@ def add_rv_status(tl: TargetList, phase_event_defs: list[ph.PhaseEventDef], **kw
 def add_tess_sectors(tl: TargetList, **kwargs) -> TargetList:
     from astroquery.mast import Tesscut
 
-
     coords = SkyCoord(ra=tl.target_list["ra"], dec=tl.target_list["dec"], unit=u.deg)
     answer = tl.copy()
     answer.target_list["TESS Sectors"] = [
@@ -643,6 +607,7 @@ def add_tess_sectors(tl: TargetList, **kwargs) -> TargetList:
     answer.target_list["TESS Sectors"] = [
         ", ".join(Tesscut.get_sectors(coordinates=coord)["sector"].astype(str)) for coord in coords
     ]
+
 
 def add_catalogs(tl: TargetList, **kwargs) -> TargetList:
     answer = tl.copy()
