@@ -445,9 +445,8 @@ def render_observing_pages(tl: tlc.TargetList, pl: pr.PriorityList, other_files:
                     f.write(d.render())
 
     # make pages for each individual target
-    desired_columns = ["RA", "Dec", "RA HMS", "Dec DMS", "Vmag", "Teff"]
+    desired_columns = ["RA", "Dec", "RA HMS", "Dec DMS", "Vmag", "Teff", "Distance"]
     columns = [item for item in desired_columns if item in tl.target_list.columns]
-    # list({"RA", "Dec", "RA HMS", "Dec DMS", "Vmag", "Teff", "asdf"} & set(tl.target_list.columns))
 
     for _, row in tl.target_list.iterrows():
         target_name = row["Target Name"]
