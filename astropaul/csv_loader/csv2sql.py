@@ -45,6 +45,7 @@ class InferredTypeTransformation(DataTransformation):
         return [(column_name, column_type) for column_name, column_type in self.column_types.items()]
 
     def do_transformation(self, source, dest):
+        # verify that the data type of each column matches the example data provided during initialization
         for column_name, expected_column_type in self.column_types.items():
             source_column_type = InferredTypeTransformation._series_to_column_type(source[column_name])
             if source_column_type != expected_column_type:
