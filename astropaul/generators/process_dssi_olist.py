@@ -54,7 +54,7 @@ observation_line_patterns = [
             (?P<notes>.*)""",
     ),
     # (
-    #     "No Image Num, Gains, or Time",
+    #     "No Image Num, Gains, or Time", # Jimmy said these lines shouldn't be used
     #     r"""(?x)
     #         (?P<target_name>\"{0,1}.{7,13}\"{0,1})\s+
     #         (?P<ra>\d\d:\d\d:\d\d\.\d+)\s+
