@@ -165,48 +165,6 @@ def concat_dataframe(tl: TargetList, other_df: pd.DataFrame, **kwargs) -> Target
     )
 
 
-def add_dssi(tl: TargetList, **kwargs) -> TargetList:
-    verify_step_requirements(tl)
-    answer = tl.copy()
-    # add a table of all dssi observations
-    all_targets = list(tl.target_list["Target Name"].unique())
-    dssi_observations = pd.read_sql("select * from dssi_observations;", kwargs["connection"])
-    dssi_observations = dssi_observations[dssi_observations["target_name"].isin(all_targets)]
-    convert_columns_to_human_style(dssi_observations)
-    answer.other_lists["DSSI Observations"] = dssi_observations
-
-    # add to the target list a column indicating the number of dssi observations for each target
-    count_column = "Num DSSI"
-    dssi_counts = dssi_observations["Target Name"].value_counts()
-    answer.target_list[count_column] = answer.target_list["Target Name"].map(dssi_counts)
-    answer.target_list[count_column] = answer.target_list[count_column].fillna(0).astype(int)
-    primary_columns, secondary_columns = answer.column_groups.get("Count", ([], []))
-    primary_columns.append(count_column)
-    answer.column_groups["Count"] = (primary_columns, secondary_columns)
-    return answer
-
-
-def add_pepsi(tl: TargetList, **kwargs) -> TargetList:
-    verify_step_requirements(tl)
-    answer = tl.copy()
-    # add a table of all pepsi observations
-    all_targets = list(tl.target_list["Target Name"].unique())
-    pepsi_observations = pd.read_sql("select * from pepsi_spectra;", kwargs["connection"])
-    pepsi_observations = pepsi_observations[pepsi_observations["target_name"].isin(all_targets)]
-    convert_columns_to_human_style(pepsi_observations)
-    answer.other_lists["PEPSI Observations"] = pepsi_observations
-
-    # add to the target list a column indicating the number of dssi observations for each target
-    count_column = "Num PEPSI"
-    pepsi_counts = pepsi_observations["Target Name"].value_counts()
-    answer.target_list[count_column] = answer.target_list["Target Name"].map(pepsi_counts)
-    answer.target_list[count_column] = answer.target_list[count_column].fillna(0).astype(int)
-    primary_columns, secondary_columns = answer.column_groups.get("Count", ([], []))
-    primary_columns.append(count_column)
-    answer.column_groups["Count"] = (primary_columns, secondary_columns)
-    return answer
-
-
 def add_lists(tl: TargetList, **kwargs) -> TargetList:
     verify_step_requirements(tl)
     conn = kwargs["connection"]
@@ -227,19 +185,6 @@ def add_lists(tl: TargetList, **kwargs) -> TargetList:
         column_name = f"List {target_list}"
         answer.target_list[column_name] = answer.target_list["Target Name"].isin(list_members)
     answer.column_groups["List"] = ([], [f"List {name}" for name in target_lists])
-    return answer
-
-
-def add_ephemerides(tl: TargetList, **kwargs) -> TargetList:
-    verify_step_requirements(tl)
-    ephem = pd.read_sql("select * from ephemerides;", kwargs["connection"])
-    all_targets = list(tl.target_list["Target Name"].unique())
-    convert_columns_to_human_style(ephem)
-    ephem = ephem[ephem["Target Name"].isin(all_targets)]
-    ephem["Duration (Hours)"] = ephem["Duration"]
-    ephem["Duration"] = [duration / 24 for duration in ephem["Duration (Hours)"]]  # also convert duration to hours
-    answer = tl.copy()
-    answer.add_other("Ephemerides", ephem)
     return answer
 
 
@@ -629,4 +574,26 @@ def add_catalogs(tl: TargetList, **kwargs) -> TargetList:
     convert_columns_to_human_style(catalog_members)
     catalog_members = catalog_members[catalog_members["Target Name"].isin(all_targets)]
     answer.other_lists["Catalog Membership"] = catalog_members
+    return answer
+
+
+def add_database_table(
+    tl: TargetList, table_name: str, add_count: bool = True, **kwargs
+) -> TargetList:
+    verify_step_requirements(tl)
+    answer = tl.copy()
+    table_contents = pd.read_sql(f"select * from {table_name};", kwargs["connection"])
+    convert_columns_to_human_style(table_contents)
+    human_name = db_style_to_string(table_name)
+    if "Target Name" in table_contents.columns:
+        all_targets = list(tl.target_list["Target Name"].unique())
+        table_contents = table_contents[table_contents["Target Name"].isin(all_targets)]
+        if add_count:
+            count_column = f"Num {human_name}"
+            counts = table_contents["Target Name"].value_counts()
+            answer.target_list[count_column] = answer.target_list["Target Name"].map(counts).fillna(0).astype(int)
+            primary_columns, secondary_columns = answer.column_groups.get("Count", ([], []))
+            primary_columns.append(count_column)
+            answer.column_groups["Count"] = (primary_columns, secondary_columns)
+    answer.other_lists[human_name] = table_contents
     return answer
