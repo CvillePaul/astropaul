@@ -116,6 +116,7 @@ class TableConfig:
                     raise ValueError(f"Constraint policy in {config_file} must be subset of: {all_constraint_options}")
             # process things that determine column order, transformations, type
             unspecified_columns = set(example_data.columns)
+
             if config.has_section("columns"):
                 for column_name, column_type in config.items("columns"):
                     column_name = string_to_db_style(column_name)
@@ -135,9 +136,9 @@ class TableConfig:
                         and transformation_class.__module__ == __name__
                     ):
                         raise ValueError(f"Unknown column transformer {transformation_name}")
-                    transformation_columns = frozenset([column_name.lower().strip() for column_name in column_list.split(",")])
+                    transformation_columns = (column_name.lower().strip() for column_name in column_list.split(","))
                     specified_transformations[transformation_columns] = transformation_class
-                    unspecified_columns -= transformation_columns
+                    unspecified_columns.difference_update(transformation_columns)
             # now handle config items dealing with data relations
             if config.has_section("constraints"):
                 for dependent_column, foreign_target in config.items("constraints"):
@@ -292,11 +293,13 @@ def csv2sql(base_dir: str, outfile: str, verbose: bool = False):
         # load data into the new tables
         table_order = determine_table_order(table_configs)
         for table_name in table_order:
-            data_files = data_files_by_table[table_name]
             table_config = table_configs[table_name]
+            if verbose:
+                print(f"Table {table_config.table_name}: ", end="")
+            data_files = data_files_by_table[table_name]
             num_rows = insert_csv_data(engine, metadata, data_files, table_config)
             if verbose:
-                print(f"{num_rows:5d} rows inserted into table {table_config.table_name} from {len(data_files)} files")
+                print(f"{num_rows} rows inserted from {len(data_files)} files")
 
         if verbose:
             print(f"Database {outfile_path} created")
