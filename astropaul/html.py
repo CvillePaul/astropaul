@@ -18,14 +18,15 @@ import astropaul.targetlistcreator as tlc
 
 
 def dataframe_to_datatable(
-    table: pd.DataFrame, table_name: str = "table", caption: str = "", table_options: dict = None, buttons: list = None
+    table: pd.DataFrame, table_name: str = "table", table_options: dict = None, buttons: list = None
 ):
     default_options = {
         "connected": True,
         "paging": False,
         "maxBytes": 0,
         "maxColumns": 0,
-        "autoWidth": False,
+        "autoWidth": True,
+        "style": "width: auto; float: left; caption-side:bottom;",
         "layout": {"topStart": None, "topEnd": None, "bottomStart": None, "bottomEnd": None},
         "classes": "compact cell-border hover",
     }
@@ -33,10 +34,8 @@ def dataframe_to_datatable(
         default_options["buttons"] = buttons
     if table_options is None:
         table_options = {}
-    if caption == "":
-        caption = f"Created {datetime.now().astimezone().isoformat(sep=" ", timespec="seconds")} on {platform.node()}"
     table_name = table_name.replace(" ", "_")
-    html = itables.to_html_datatable(df=table, caption=caption, table_id=table_name, **{**default_options, **table_options})
+    html = itables.to_html_datatable(df=table, table_id=table_name, **{**default_options, **table_options})
     html += textwrap.dedent(
         f"""
         <style>
@@ -50,11 +49,20 @@ def dataframe_to_datatable(
             text-align: left;
             font-style: italic;
         }}
+        button.exportButton,
+        a.exportButton {{
+            padding: 0px 4px !important;
+        }}
         </style>
         """
     )
     return html
 
+def standard_footer():
+    return tags.p(
+        f"Created {datetime.now().astimezone().isoformat(sep=" ", timespec="seconds")} on {platform.node()}",
+        style="text-align: left; font-style: italic;",
+    )
 
 def render_observing_pages(tl: tlc.TargetList, pl: pr.PriorityList, other_files: dict[str, str], dir: str = "html") -> str:
     # wipe out contents of dir
@@ -213,10 +221,7 @@ def render_observing_pages(tl: tlc.TargetList, pl: pr.PriorityList, other_files:
             d += t
         # write out summary page
         d += tags.script(util.raw(keybinding_script))
-        d.footer += tags.p(
-            f"Created {datetime.now().astimezone().isoformat(sep=" ", timespec="seconds")} on {platform.node()}",
-            style="text-align: left; font-style: italic;",
-        )
+        d.footer += standard_footer()
 
         with open(f"{dir}/index.html", "w") as f:
             f.write(d.render())
@@ -228,6 +233,14 @@ def render_observing_pages(tl: tlc.TargetList, pl: pr.PriorityList, other_files:
     with dominate.document(title=title) as d:
         d.head += tags.a("Summary Page", href="index.html", id="summary")
         d += tags.h1(title, style="text-align: center")
+        # buttons = [
+        #     {
+        #         "extend": "columnsToggle",
+        #         "columns": [f"{col}:title" for col in secondary_cols],
+        #     }
+        #     for group, (_, secondary_cols) in tl.column_groups.items()
+        #     if secondary_cols
+        # ]
         buttons = [
             {
                 "extend": "columnToggle",
@@ -241,10 +254,10 @@ def render_observing_pages(tl: tlc.TargetList, pl: pr.PriorityList, other_files:
         d += util.raw(
             dataframe_to_datatable(
                 tltl,
-                title,
                 table_options={
                     "showIndex": False,
                     "layout": {
+                        # "top2Start": {"buttons": ["csvHtml5", "copyHtml5"]},
                         "topStart": {
                             "search": True,
                             "buttons": buttons,
@@ -253,11 +266,19 @@ def render_observing_pages(tl: tlc.TargetList, pl: pr.PriorityList, other_files:
                             "info": True,
                             "searchBuilder": True,
                         },
+                        "bottomStart": {
+                            "buttons": [
+                                {"extend": "csvHtml5", "className": "exportButton"},
+                                {"extend": "copyHtml5", "className": "exportButton"},
+                            ],
+                        },
                     },
+                    "autoWidth": False,
                 },
             )
         )
         d += tags.script(util.raw(keybinding_script))
+        d.footer += standard_footer()
         with open(f"{dir}/{title}.html", "w") as f:
             f.write(d.render())
 
@@ -475,18 +496,30 @@ def render_observing_pages(tl: tlc.TargetList, pl: pr.PriorityList, other_files:
                 else:
                     entries = ot[ot["Target Name"] == target_name].drop("Target Name", axis=1)
                 d += tags.h2(f"{other_table} ({len(entries)})")
+                entries = entries.reset_index(drop=True)
                 if not entries.empty:
-                    d += util.raw(entries.style.hide(axis="index").set_table_styles(table_styles).to_html())
+                    table_options = {
+                        "autowidth": False,
+                        "float": "left",
+                        "layout": {
+                            "topEnd": None,
+                            "bottomStart": {"buttons": [
+                                {"extend": "csvHtml5", "className": "exportButton"},
+                                {"extend": "copyHtml5", "className": "exportButton"},
+                                ],
+                            },
+                        },
+                    }
+
+                    d += util.raw(dataframe_to_datatable(entries, other_table, table_options))
+                    # d += util.raw(entries.style.hide(axis="index").set_table_styles(table_styles).to_html())
                 else:
                     d += tags.span("(Empty Table)")
 
             d.head += horizontal_space
             d.head += tags.a("Summary Page", href="../index.html", id="summary")
             d += tags.script(util.raw(keybinding_script))
-            d.footer += tags.p(
-                f"Created {datetime.now().astimezone().isoformat(sep=" ", timespec="seconds")} on {platform.node()}",
-                style="text-align: left; font-style: italic;",
-            )
+            d.footer += standard_footer()
             with open(f"{dir}/targets/{target_name}.html", "w") as f:
                 f.write(d.render())
 
