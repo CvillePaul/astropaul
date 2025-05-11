@@ -152,7 +152,8 @@ def add_targets(tl: TargetList = TargetList(), **kwargs) -> TargetList:
         kwargs["connection"],
     )
     convert_columns_to_human_style(targets)
-    column_groups = {"Target": (["Target Name"], [column for column in targets.columns if column != "Target Name"])}
+    important_columns = ["Target Name", "RA", "Dec"]
+    column_groups = {"Target": (important_columns, [column for column in targets.columns if not column in important_columns])}
     return TargetList.merge(tl, targets, column_groups, {})
 
 
