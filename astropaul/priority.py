@@ -94,7 +94,7 @@ def calculate_moon_priority(
 ) -> None:
     for _, row in pl.target_list.target_list.iterrows():
         target = row["Target Name"]
-        coord = SkyCoord(ra=row["ra"], dec=row["dec"], unit=u.deg)
+        coord = SkyCoord(ra=row["RA"], dec=row["Dec"], unit=u.deg)
         for segment_table in pl.target_tables[target]:
             times = Time(segment_table.index)
             illuminations = ap.moon_illumination(times)
@@ -121,7 +121,7 @@ def calculate_altitude_priority(
         ]
     for _, row in pl.target_list.target_list.iterrows():
         target = row["Target Name"]
-        coord = SkyCoord(ra=row["ra"], dec=row["dec"], unit=u.deg)
+        coord = SkyCoord(ra=row["RA"], dec=row["Dec"], unit=u.deg)
         for segment_table in pl.target_tables[target]:
             times = Time(segment_table.index)
             altitudes = pl.session.observer.altaz(times, coord).alt.value
@@ -251,7 +251,7 @@ def calculate_phase_priority(pl: PriorityList, phase_defs: list[ph.PhaseEventDef
     ephem_table = pl.target_list.other_lists["Ephemerides"]
     min_priority = min(phase_categories, key=operator.itemgetter(1))
     for target, table_list in pl.target_tables.items():
-        ephem_rows = ephem_table.loc[target]
+        ephem_rows = ephem_table[ephem_table["Target Name"] == target]
         ephem_rows = ephem_rows[ephem_rows["Member"] == "a"]
         if ephem_rows.empty or len(ephem_rows) < 2:
             # flunk anything that doesn't have at least two binaries
@@ -445,7 +445,7 @@ def aggregate_target_priorities(pl: PriorityList, skip_column_threshold: float =
     for sub_segments, aggregate_table in zip(pl.segments, aggregate_tables):
         if len(aggregate_table.columns) == 0:
             continue  # don't add tables with no columns
-        segment_target_list = target_list[target_list["Target Name"].isin(aggregate_table.columns)].sort_values("ra")
+        segment_target_list = target_list[target_list["Target Name"].isin(aggregate_table.columns)].sort_values("RA")
         target_names = segment_target_list["Target Name"].tolist()
         # calculate LST at beginning of this observing segment
         lst = pl.session.observer.local_sidereal_time(sub_segments[0][0]).to(u.deg).value
@@ -453,7 +453,7 @@ def aggregate_target_priorities(pl: PriorityList, skip_column_threshold: float =
         # now "pivot" the table so the first column is the RA
         i = 0
         for _, target in segment_target_list.iterrows():
-            if target["ra"] > first_ra_of_night:
+            if target["RA"] > first_ra_of_night:
                 break
             i += 1
         target_names = target_names[i:] + target_names[:i]  # "rotate" the list so first ra is one > lst

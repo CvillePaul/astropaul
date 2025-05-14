@@ -68,19 +68,19 @@ def assign_rv_standards(
 
 
 def make_lbt_readme_table(target_list: pd.DataFrame, beg_lst: float = 0) -> pd.DataFrame:
-    targets = target_list.copy().sort_values("ra")
+    targets = target_list.copy().sort_values("RA")
     # "pivot" the rows of the table so it starts with the first ra > beg_lst
     i = 0
     for _, row in targets.iterrows():
-        if row["ra"] > beg_lst:
+        if row["RA"] > beg_lst:
             break
         i += 1
     targets = pd.concat([targets.iloc[i:], targets.iloc[:i]], ignore_index=True)
     # build up the output table
     readme = pd.DataFrame()
     readme["Target Name"] = targets["Target Name"]
-    readme["RA"] = targets["RA"]
-    readme["Dec"] = targets["Dec"]
+    readme["RA"] = targets["RA HMS"]
+    readme["Dec"] = targets["Dec DMS"]
     readme["Vmag"] = targets["Vmag"]
     readme["Teff"] = [f"{val:.0f}" for val in targets["Teff"]]
     readme["Fiber"] = targets["PEPSI fiber"]
