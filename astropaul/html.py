@@ -17,9 +17,7 @@ import astropaul.priority as pr
 import astropaul.targetlistcreator as tlc
 
 
-def dataframe_to_datatable(
-    table: pd.DataFrame, table_name: str = "table", table_options: dict = None, buttons: list = None
-):
+def dataframe_to_datatable(table: pd.DataFrame, table_name: str = "table", table_options: dict = None, buttons: list = None, column_defs: dict = None):
     default_options = {
         "connected": True,
         "paging": False,
@@ -32,10 +30,12 @@ def dataframe_to_datatable(
     }
     if buttons:
         default_options["buttons"] = buttons
-    if table_options is None:
+    if not table_options:
         table_options = {}
+    if not column_defs:
+        column_defs = {}
     table_name = table_name.replace(" ", "_")
-    html = itables.to_html_datatable(df=table, table_id=table_name, **{**default_options, **table_options})
+    html = itables.to_html_datatable(df=table, table_id=table_name, **{**default_options, **table_options}, columnDefs=column_defs)
     html += textwrap.dedent(
         f"""
         <style>
@@ -52,17 +52,20 @@ def dataframe_to_datatable(
         button.exportButton,
         a.exportButton {{
             padding: 0px 4px !important;
+            font-size: 12px !important;
         }}
         </style>
         """
     )
     return html
 
+
 def standard_footer():
     return tags.p(
         f"Created {datetime.now().astimezone().isoformat(sep=" ", timespec="seconds")} on {platform.node()}",
         style="text-align: left; font-style: italic;",
     )
+
 
 def render_observing_pages(tl: tlc.TargetList, pl: pr.PriorityList, other_files: dict[str, str], dir: str = "html") -> str:
     # wipe out contents of dir
@@ -129,7 +132,8 @@ def render_observing_pages(tl: tlc.TargetList, pl: pr.PriorityList, other_files:
         d += tags.br()
         # output information about the targets
         d += tags.h2(
-            f"Target List ({len(tl.target_list)} targets)", tags.a("View target table", href=f"{tl.name} Target List.html", id="targets")
+            f"Target List ({len(tl.target_list)} targets)",
+            tags.a("View target table", href=f"{tl.name} Target List.html", id="targets"),
         )
         target_types = collections.Counter(tl.target_list["Target Type"])
         t = tags.table(border=border, cellpadding=padding)
@@ -167,8 +171,8 @@ def render_observing_pages(tl: tlc.TargetList, pl: pr.PriorityList, other_files:
             t.set_attribute("style", "text-align: center;")
             with t:
                 columns = [
-                    tags.th("Start UTC"),
-                    tags.th("Finish UTC"),
+                    tags.th("Start UTC/JD"),
+                    tags.th("Finish UTC/JD"),
                     tags.th("Observing Hours"),
                     tags.th("Moon Illumination"),
                     tags.th("Priorities"),
@@ -251,13 +255,19 @@ def render_observing_pages(tl: tlc.TargetList, pl: pr.PriorityList, other_files:
             for group, (_, secondary_cols) in tl.column_groups.items()
             if secondary_cols
         ]
+        col_indexes_to_hide = [
+            tltl.columns.get_loc(col)
+            for _, secondary_cols in tl.column_groups.values()
+            if secondary_cols
+            for col in secondary_cols
+        ]
+        column_defs = [{"targets": col_indexes_to_hide, "visible": False}]
         d += util.raw(
             dataframe_to_datatable(
                 tltl,
                 table_options={
                     "showIndex": False,
                     "layout": {
-                        # "top2Start": {"buttons": ["csvHtml5", "copyHtml5"]},
                         "topStart": {
                             "search": True,
                             "buttons": buttons,
@@ -275,6 +285,7 @@ def render_observing_pages(tl: tlc.TargetList, pl: pr.PriorityList, other_files:
                     },
                     "autoWidth": False,
                 },
+                column_defs=column_defs,
             )
         )
         d += tags.script(util.raw(keybinding_script))
@@ -322,7 +333,19 @@ def render_observing_pages(tl: tlc.TargetList, pl: pr.PriorityList, other_files:
             title = f"Numerical Priorities, {start_utc} UTC"
             with dominate.document(title=title) as d:
                 d += tags.h1(title, style="text-align: center")
-                d += util.raw(dataframe_to_datatable(pt, "Numerical_Priority", table_options={"sort": False}))
+                table_options = {
+                    "sort": False,
+                    "layout": {
+                        "topEnd": None,
+                        "bottomStart": {
+                            "buttons": [
+                                {"extend": "csvHtml5", "className": "exportButton"},
+                                {"extend": "copyHtml5", "className": "exportButton"},
+                            ],
+                        },
+                    },
+                }
+                d += util.raw(dataframe_to_datatable(pt, "Numerical_Priority", table_options=table_options))
                 if i > 0:
                     d.head += tags.a("<-Prev", href=f"Numerical Priorities {start_times[i - 1]}.html", id="prevDay")
                 else:
@@ -352,7 +375,7 @@ def render_observing_pages(tl: tlc.TargetList, pl: pr.PriorityList, other_files:
                             f"Target Scores for {start_utc} UTC",
                             style="text-align: center",
                         )
-                        d += tags.p(util.raw(dataframe_to_datatable(tt, "Target_Scores", table_options={"sort": False})))
+                        d += tags.p(util.raw(dataframe_to_datatable(tt, "Target_Scores", table_options=table_options)))
                         if i > 0:
                             d.head += tags.a(
                                 "<-Prev Day", href=f"Target Scores {target} {start_times[i - 1]}.html", id="prevDay"
@@ -418,8 +441,12 @@ def render_observing_pages(tl: tlc.TargetList, pl: pr.PriorityList, other_files:
             # not all targets on list have nonzero priority, so we need a list of targets for this particular segment
             segment_targets = list_targets[list_targets["Target Name"].isin(ct.columns)]
             # add some helpful informational rows to the top of the chart
-            ct.loc["RA"] = [segment_targets[segment_targets["Target Name"] == col]["RA"].values[0][:8] for col in ct.columns]
-            ct.loc["Dec"] = [segment_targets[segment_targets["Target Name"] == col]["Dec"].values[0][:9] for col in ct.columns]
+            ct.loc["RA"] = [
+                segment_targets[segment_targets["Target Name"] == col]["RA HMS"].values[0][:8] for col in ct.columns
+            ]
+            ct.loc["Dec"] = [
+                segment_targets[segment_targets["Target Name"] == col]["Dec DMS"].values[0][:9] for col in ct.columns
+            ]
             ct.loc["Vmag"] = [
                 f"{segment_targets[segment_targets["Target Name"] == col]["Vmag"].values[0]:.1f}" for col in ct.columns
             ]
@@ -503,9 +530,10 @@ def render_observing_pages(tl: tlc.TargetList, pl: pr.PriorityList, other_files:
                         "float": "left",
                         "layout": {
                             "topEnd": None,
-                            "bottomStart": {"buttons": [
-                                {"extend": "csvHtml5", "className": "exportButton"},
-                                {"extend": "copyHtml5", "className": "exportButton"},
+                            "bottomStart": {
+                                "buttons": [
+                                    {"extend": "csvHtml5", "className": "exportButton"},
+                                    {"extend": "copyHtml5", "className": "exportButton"},
                                 ],
                             },
                         },
@@ -523,25 +551,35 @@ def render_observing_pages(tl: tlc.TargetList, pl: pr.PriorityList, other_files:
             with open(f"{dir}/targets/{target_name}.html", "w") as f:
                 f.write(d.render())
 
+
 from playwright.sync_api import sync_playwright
+
+
 def html_to_pdf(input_html_path, output_pdf_path):
-    with open(input_html_path, 'r') as f:
-      html_content = f.read()
+    with open(input_html_path, "r") as f:
+        html_content = f.read()
     beg = html_content.find("<head>")
     end = html_content.find("</head>")
     if beg > 0 and end > 0 and end > beg:
-        html_content = html_content[0:beg] + html_content[end + 7:]
+        html_content = html_content[0:beg] + html_content[end + 7 :]
     with sync_playwright() as p:
         browser = p.chromium.launch()
         page = browser.new_page()
         page.set_content(html_content)
-        page.evaluate('''
+        page.evaluate(
+            """
             const table = document.querySelector('table.dataTable'); 
             if (table) {
                 table.style.width = 'auto';
                 table.style.maxWidth = '100%'; 
                 table.style.fontSize = 'smaller';
             }
-        ''')
-        page.pdf(path=output_pdf_path, format="Letter", landscape=True, print_background=True,)
+        """
+        )
+        page.pdf(
+            path=output_pdf_path,
+            format="Letter",
+            landscape=True,
+            print_background=True,
+        )
         browser.close()
