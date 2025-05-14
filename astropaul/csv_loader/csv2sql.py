@@ -124,7 +124,7 @@ class TableConfig:
                         raise ValueError(f"Column type specified for unknown column {column_name} in {config_file}")
                     if column_type != "str":
                         raise ValueError(f"Unknown column type {column_type} for column {column_name} in file {config_file}")
-                    specified_transformations[frozenset([column_name])] = DataTransformation
+                    specified_transformations[tuple([column_name])] = DataTransformation
                     unspecified_columns.remove(column_name)
             if config.has_section("transformations"):
                 current_module = sys.modules[__name__]
@@ -136,7 +136,8 @@ class TableConfig:
                         and transformation_class.__module__ == __name__
                     ):
                         raise ValueError(f"Unknown column transformer {transformation_name}")
-                    transformation_columns = (column_name.lower().strip() for column_name in column_list.split(","))
+                    transformation_columns = tuple([column_name.lower().strip() for column_name in column_list.split(",")])
+                    # transformation_columns = tuple((column_name.lower().strip() for column_name in column_list.split(",")))
                     specified_transformations[transformation_columns] = transformation_class
                     unspecified_columns.difference_update(transformation_columns)
             # now handle config items dealing with data relations
@@ -158,7 +159,7 @@ class TableConfig:
             column_was_specified = False
             for affected_columns, transformation_class in specified_transformations.items():
                 if column_name in affected_columns:
-                    transformation = transformation_class(example_data[affected_columns])
+                    transformation = transformation_class(example_data[list(affected_columns)])
                     column_was_specified = True
                     processed_columns.update(affected_columns)
             if not column_was_specified:
@@ -177,7 +178,7 @@ def db_style_to_string(name: str) -> str:
     """Converts a name in database style back to a more pretty, human form"""
     answer = name.replace("_", " ")
     answer = answer.title()
-    for string in ["Jd", "Utc", "Id", "Dssi", "Ra", "Hms", "Dms"]:
+    for string in ["Jd", "Utc", "Id", "Dssi", "Ra", "Hms", "Dms", "Pepsi"]:
         answer = answer.replace(string, string.upper())
     return answer
 
@@ -313,10 +314,10 @@ if __name__ == "__main__":
         prog="csv2sql",
         description="",
     )
+    parser.add_argument("-d", "--directory", default=".", help="Base directory of CSV files (default = %(default)s)")
     parser.add_argument(
         "-o", "--outfile", default="astropaul.db", help="Name of SQLite3 file to create (default = %(default)s)"
     )
-    parser.add_argument("-v", "--verbose", action="store_true", help="Output file info as each file is processed")
-    parser.add_argument("directory", default=".", help="Base directory of CSV files (default = %(default)s")
+    parser.add_argument("-v", "--verbose", action="store_true", help="Print details as each file is processed")
     args = parser.parse_args()
     csv2sql(args.directory, outfile=args.outfile, verbose=args.verbose)
