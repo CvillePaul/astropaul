@@ -1,12 +1,12 @@
 import pandas as pd
 
 import astropaul.observing as obs
-from astropaul.targetlistcreator import TargetList
+import astropaul.targetlistcreator as tlc
 from .exposure_time import pepsi_exptime
 
 
 def add_pepsi_params(
-    tl: TargetList,
+    tl: tlc.TargetList,
     fiber: str,
     cd_blue: int,
     cd_red: int,
@@ -42,28 +42,41 @@ def add_pepsi_params(
     return answer
 
 
-def assign_rv_standards(
-    tl: TargetList, science_types: list[str], rv_standard_type: str = "RV Standard", **kwargs
-) -> pd.DataFrame:
+def add_rv_calibration_targets(tl: tlc.TargetList, **kwargs) -> tlc.TargetList:
     answer = tl.copy()
-    rv_standards = answer.target_list[answer.target_list["Target Type"] == rv_standard_type]
-    targets = answer.target_list
-    # science_targets = answer.target_list[answer.target_list["Target Type"].isin(science_types)]
+    conn = kwargs["connection"]
+    rv_calibrators = pd.read_sql("select * from rv_calibration_targets;", conn)
+    #     """
+    #     select t.target_name, t.ra, t.dec, t.ra_hms, t.dec_dms, t.target_type, t.source, rct.vmag, rct.teff
+    #     from targets t
+    #     join rv_calibration_targets rct on rct.target_name = t.target_name;""",
+    #     conn,
+    # )
+    tlc.convert_columns_to_human_style(rv_calibrators)
+    answer.target_list = pd.concat([
+        answer.target_list, 
+        rv_calibrators[["Target Name", "RA", "Dec", "RA HMS", "Dec DMS", "Target Type", "Vmag", "Teff", "PM RA", "PM Dec"]],
+        ])
+    return answer
 
+
+def assign_rv_standards(tl: tlc.TargetList, **kwargs) -> pd.DataFrame:
     def find_standard(value: float, standards: pd.DataFrame) -> int:
         closest_idx = (standards["Teff"] - value).abs().idxmin()
         if closest_idx == closest_idx:
             return standards.loc[closest_idx, "Target Name"]
         else:
             return ""
+    answer = tl.copy()
+    targets = answer.target_list
+    rv_standards = targets[targets["Target Type"] == "RV Standard"]
+    science_targets = set(targets[~targets["Target Type"].isin(["RV Standard", "Telluric Standard"])]["Target Name"])
 
-    targets["RV Standard"] = [
-        find_standard(teff, standards=rv_standards) if type in science_types else ""
-        for teff, type in targets[["Teff", "Target Type"]].values
+    answer.target_list["RV Standard"] = [
+        find_standard(teff, standards=rv_standards)
+        if target_name in science_targets else ""
+        for target_name, teff in targets[["Target Name", "Teff"]].values
     ]
-    # science_targets["Teff"].apply(find_standard, standards=rv_standards)
-    # answer.target_list = answer.target_list.merge(science_targets[["Teff", "RV Standard"]], on="Teff", how="left")
-    # answer.target_list["RV Standard"].fillna("", inplace=True)
     return answer
 
 
