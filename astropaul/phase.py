@@ -90,7 +90,7 @@ def calc_time_of_gress(
     """
     t = ephemeris.t0 + orbit * ephemeris.period  # mid eclipse
     if ephemeris.duration == ephemeris.duration:
-        half_duration = ephemeris.duration / 2
+        half_duration = ephemeris.duration /24 / 2
     else:
         if synthetic_phase_percent == synthetic_phase_percent:
             half_duration = ephemeris.period * synthetic_phase_percent / 2

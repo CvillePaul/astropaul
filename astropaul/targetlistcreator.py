@@ -403,8 +403,9 @@ def add_system_configuration(
     For a system not in eclipse, show the percent of phase, where 0.0 is mid eclipse of the a member."""
     verify_step_requirements(tl, {table_name})
     table = tl.other_lists[table_name]
-    if not time_column in table.columns:
-        raise ValueError(f"Table {table_name} does not have a column {time_column}")
+    for col in ["Target Name", time_column]:
+        if not col in table.columns:
+            raise ValueError(f"Table {table_name} does not have a column {time_column}")
     answer = tl.copy()
     all_targets = set(table["Target Name"].unique())
     # determine max number of systems we need to handle, max duration
@@ -426,7 +427,7 @@ def add_system_configuration(
         target_ephem = ephem[ephem["Target Name"] == target_name]
         for system in systems:
             system_ephem = target_ephem[target_ephem["System"] == system]
-            if system_ephem.empty:
+            if system_ephem.empty: # this target doesn't have an ephem entry for this system
                 system_eclipses[system].append("")
                 system_durations[system].append(float("nan"))
                 continue
@@ -434,7 +435,7 @@ def add_system_configuration(
             for _, ephem_row in system_ephem.sort_values("Member").iterrows():
                 member_ephem = ph.Ephemeris.from_dataframe_row(ephem_row)
                 if member_ephem.duration != member_ephem.duration:
-                    continue
+                    continue # skip calculation for members with no duration specified
                 event_list = ph.PhaseEventList.calc_phase_events(
                     member_ephem, phase_event_defs, observation_time, observation_time + member_ephem.period
                 )
@@ -442,7 +443,7 @@ def add_system_configuration(
                     raise ValueError(f"Unexpected event list {event_list}")
                 if event_list.events[0].type == "Eclipse":
                     system_eclipses[system].append(f"{system}{ephem_row["Member"]}")
-                    duration_percent = 1 - (event_list.events[1].jd - observation_time) / member_ephem.duration
+                    duration_percent = 1 - (event_list.events[1].jd - observation_time) / member_ephem.duration * 24
                     system_durations[system].append(duration_percent)
                     eclipse_found = True
                     break
