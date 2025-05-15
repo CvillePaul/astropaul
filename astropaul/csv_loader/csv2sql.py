@@ -178,7 +178,7 @@ def db_style_to_string(name: str) -> str:
     """Converts a name in database style back to a more pretty, human form"""
     answer = name.replace("_", " ")
     answer = answer.title()
-    for string in ["Jd", "Utc", "Id", "Dssi", "Ra", "Hms", "Dms", "Pepsi"]:
+    for string in ["Jd", "Utc", "Id", "Dssi", "Ra", "Hms", "Dms", "Pepsi", "Rv", "Pm"]:
         answer = answer.replace(string, string.upper())
     return answer
 
