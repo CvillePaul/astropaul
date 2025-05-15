@@ -571,8 +571,9 @@ def add_catalogs(tl: TargetList, **kwargs) -> TargetList:
     """,
         conn,
     )
-    catalog_members_from_tess = tess_catalog_ids.melt(id_vars="target_name", var_name="catalog_name", value_name="catalog_id")
-    catalog_members = pd.concat([catalog_members, catalog_members_from_tess], ignore_index=True)
+    tess_members = tess_catalog_ids.melt(id_vars="target_name", var_name="catalog_name", value_name="catalog_id")
+    tess_members = tess_members[tess_members["catalog_id"] == tess_members["catalog_id"]]
+    catalog_members = pd.concat([catalog_members, tess_members], ignore_index=True)
     convert_columns_to_human_style(catalog_members)
     catalog_members = catalog_members[catalog_members["Target Name"].isin(all_targets)]
     answer.other_lists["Catalog Membership"] = catalog_members
