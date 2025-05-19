@@ -17,7 +17,9 @@ import astropaul.priority as pr
 import astropaul.targetlistcreator as tlc
 
 
-def dataframe_to_datatable(table: pd.DataFrame, table_name: str = "table", table_options: dict = None, buttons: list = None, column_defs: dict = None):
+def dataframe_to_datatable(
+    table: pd.DataFrame, table_id: str = "table", table_options: dict = None, buttons: list = None, column_defs: dict = None
+):
     default_options = {
         "connected": True,
         "paging": False,
@@ -34,13 +36,15 @@ def dataframe_to_datatable(table: pd.DataFrame, table_name: str = "table", table
         table_options = {}
     if not column_defs:
         column_defs = {}
-    table_name = table_name.replace(" ", "_")
-    html = itables.to_html_datatable(df=table, table_id=table_name, **{**default_options, **table_options}, columnDefs=column_defs)
+    table_id = table_id.replace(" ", "_")
+    html = itables.to_html_datatable(
+        df=table, table_id=table_id, **{**default_options, **table_options}, columnDefs=column_defs
+    )
     html += textwrap.dedent(
         f"""
         <style>
         td {{text-align: center}}
-        #{table_name} th {{
+        #{table_id} th {{
             white-space: normal;
             word-wrap: break-word;
             text-align: center;
@@ -60,34 +64,12 @@ def dataframe_to_datatable(table: pd.DataFrame, table_name: str = "table", table
     return html
 
 
-def standard_footer():
-    return tags.p(
-        f"Created {datetime.now().astimezone().isoformat(sep=" ", timespec="seconds")} on {platform.node()}",
-        style="text-align: left; font-style: italic;",
-    )
+def horizontal_space():
+    return tags.span(style="display: inline-block; width: 20px;")
 
 
-def render_observing_pages(tl: tlc.TargetList, pl: pr.PriorityList, other_files: dict[str, str], dir: str = "html") -> str:
-    # wipe out contents of dir
-    dir_cleared = False
-    fail_count = 0
-    while not dir_cleared:
-        try:
-            shutil.rmtree(dir)
-            dir_cleared = True
-        except FileNotFoundError:
-            break  # don't care if directory didn't already exist
-        except PermissionError as e:
-            # try again many times if permission error while removing directory (due to Dropbox file sync lock issue)
-            fail_count += 1
-            if fail_count > 50:
-                raise PermissionError(f"Tried {fail_count} times", e)
-    pathlib.Path(f"{dir}/targets").mkdir(parents=True)
-    if pl:
-        pathlib.Path(f"{dir}/target scores").mkdir(parents=True)
-
-    horizontal_space = tags.span(style="display: inline-block; width: 20px;")
-    keybinding_script = textwrap.dedent(
+def keybinding_script():
+    return textwrap.dedent(
         """
         document.addEventListener("keydown", function(event) {
             if (event.key === "ArrowRight") { document.getElementById("nextDay").click(); }
@@ -101,15 +83,30 @@ def render_observing_pages(tl: tlc.TargetList, pl: pr.PriorityList, other_files:
         });
     """
     )
-    # make overall summary page that links to all the other pages
+
+
+def standard_footer():
+    return tags.p(
+        f"Created {datetime.now().astimezone().isoformat(sep=" ", timespec="seconds")} on {platform.node()}",
+        style="text-align: left; font-style: italic;",
+    )
+
+
+def cell_border():
+    return 1
+
+
+def cell_padding():
+    return 10
+
+
+def make_summary_page(tl: tlc.TargetList, pl: pr.PriorityList, other_files: dict[str, str], dir: str = "html") -> None:
     with dominate.document(title=tl.name) as d:
-        border = 1
-        padding = 10
         d += tags.h1(tl.name)
         if pl:
             # output information about the observing session
             d += tags.h2("Observing session details:")
-            t = tags.table(border=border, cellpadding=padding)
+            t = tags.table(border=cell_border(), cellpadding=cell_padding())
             with t:
                 tags.tr(
                     tags.td("Site"),
@@ -136,7 +133,7 @@ def render_observing_pages(tl: tlc.TargetList, pl: pr.PriorityList, other_files:
             tags.a("View target table", href=f"{tl.name} Target List.html", id="targets"),
         )
         target_types = collections.Counter(tl.target_list["Target Type"])
-        t = tags.table(border=border, cellpadding=padding)
+        t = tags.table(border=cell_border(), cellpadding=cell_padding())
         with t:
             for type, count in target_types.items():
                 tags.tr(
@@ -167,7 +164,7 @@ def render_observing_pages(tl: tlc.TargetList, pl: pr.PriorityList, other_files:
         if pl:
             # output information about target priorities
             d += tags.h2(f"Priorities ({pl.interval} interval)")
-            t = tags.table(border=border, cellpadding=padding)
+            t = tags.table(border=cell_border(), cellpadding=cell_padding())
             t.set_attribute("style", "text-align: center;")
             with t:
                 columns = [
@@ -216,7 +213,7 @@ def render_observing_pages(tl: tlc.TargetList, pl: pr.PriorityList, other_files:
             # write list of members of each category
             d += tags.h2("Category Members")
             d += tags.p("Highest category attained by a target across entire observing session")
-            t = tags.table(border=border, cellpadding=padding)
+            t = tags.table(border=cell_border(), cellpadding=cell_padding())
             with t:
                 tags.tr(tags.th("Category"), tags.th("Count"), tags.th("Members"))
                 for label in pl.category_labels[::-1]:
@@ -224,27 +221,20 @@ def render_observing_pages(tl: tlc.TargetList, pl: pr.PriorityList, other_files:
                     tags.tr(tags.td(label if label else "(None)"), tags.td(len(members)), tags.td(", ".join(members)))
             d += t
         # write out summary page
-        d += tags.script(util.raw(keybinding_script))
+        d += tags.script(util.raw(keybinding_script()))
         d.footer += standard_footer()
 
         with open(f"{dir}/index.html", "w") as f:
             f.write(d.render())
 
-    # make page for target list
+
+def make_target_list(tl: tlc.TargetList, pl: pr.PriorityList, other_files: dict[str, str], dir: str = "html") -> None:
     tltl = tl.target_list.copy()
     tltl["Target Name"] = [f'<a href="targets/{target_name}.html">{target_name}</a>' for target_name in tltl["Target Name"]]
     title = f"{tl.name} Target List"
     with dominate.document(title=title) as d:
         d.head += tags.a("Summary Page", href="index.html", id="summary")
         d += tags.h1(title, style="text-align: center")
-        # buttons = [
-        #     {
-        #         "extend": "columnsToggle",
-        #         "columns": [f"{col}:title" for col in secondary_cols],
-        #     }
-        #     for group, (_, secondary_cols) in tl.column_groups.items()
-        #     if secondary_cols
-        # ]
         buttons = [
             {
                 "extend": "columnToggle",
@@ -288,11 +278,15 @@ def render_observing_pages(tl: tlc.TargetList, pl: pr.PriorityList, other_files:
                 column_defs=column_defs,
             )
         )
-        d += tags.script(util.raw(keybinding_script))
+        d += tags.script(util.raw(keybinding_script()))
         d.footer += standard_footer()
         with open(f"{dir}/{title}.html", "w") as f:
             f.write(d.render())
 
+
+def make_numerical_scores_pages(
+    tl: tlc.TargetList, pl: pr.PriorityList, other_files: dict[str, str], dir: str = "html"
+) -> None:
     # make pages for numerical priorities
     if pl and pl.numerical_priorities:
         start_times = [f"{pt.index[0]:%Y-%m-%d}" for pt in pl.numerical_priorities]
@@ -350,16 +344,16 @@ def render_observing_pages(tl: tlc.TargetList, pl: pr.PriorityList, other_files:
                     d.head += tags.a("<-Prev", href=f"Numerical Priorities {start_times[i - 1]}.html", id="prevDay")
                 else:
                     d.head += tags.span("<-Prev")
-                d.head += horizontal_space
+                d.head += horizontal_space()
                 if i < len(start_times) - 1:
                     d.head += tags.a("Next->", href=f"Numerical Priorities {start_times[i + 1]}.html", id="nextDay")
                 else:
                     d.head += tags.span("Next->")
-                d.head += horizontal_space
+                d.head += horizontal_space()
                 d.head += tags.a("Categorical Priorities", href=f"Categorical Priorities {start_utc}.html", id="categorical")
-                d.head += horizontal_space
+                d.head += horizontal_space()
                 d.head += tags.a("Summary Page", href="index.html", id="summary")
-                d += tags.script(util.raw(keybinding_script))
+                d += tags.script(util.raw(keybinding_script()))
                 with open(f"{dir}/Numerical Priorities {start_utc}.html", "w") as f:
                     f.write(d.render())
 
@@ -382,14 +376,14 @@ def render_observing_pages(tl: tlc.TargetList, pl: pr.PriorityList, other_files:
                             )
                         else:
                             d.head += tags.span("<-Prev Day")
-                        d.head += horizontal_space
+                        d.head += horizontal_space()
                         if i < len(start_times) - 1:
                             d.head += tags.a(
                                 "Next Day->", href=f"Target Scores {target} {start_times[i + 1]}.html", id="nextDay"
                             )
                         else:
                             d.head += tags.span("Next Day->")
-                        d.head += horizontal_space
+                        d.head += horizontal_space()
                         target_index = all_targets.index(target)
                         if target_index == 0:
                             d.head += tags.span("<-Prev Target")
@@ -399,7 +393,7 @@ def render_observing_pages(tl: tlc.TargetList, pl: pr.PriorityList, other_files:
                                 href=f"Target Scores {all_targets[target_index - 1]} {start_utc}.html",
                                 id="prevTarget",
                             )
-                        d.head += horizontal_space
+                        d.head += horizontal_space()
                         if target_index == len(all_targets) - 1:
                             d.head += tags.span("Next Target->")
                         else:
@@ -408,20 +402,22 @@ def render_observing_pages(tl: tlc.TargetList, pl: pr.PriorityList, other_files:
                                 href=f"Target Scores {all_targets[target_index + 1]} {start_utc}.html",
                                 id="nextTarget",
                             )
-                        d.head += horizontal_space
+                        d.head += horizontal_space()
                         d.head += tags.a(
                             "Numerical Priorities", href=f"../Numerical Priorities {start_utc}.html", id="numerical"
                         )
-                        d.head += horizontal_space
+                        d.head += horizontal_space()
                         d.head += tags.a(
                             "Categorical Priorities", href=f"../Categorical Priorities {start_utc}.html", id="categorical"
                         )
-                        d.head += horizontal_space
+                        d.head += horizontal_space()
                         d.head += tags.a("Summary Page", href="../index.html", id="summary")
-                        d += tags.script(util.raw(keybinding_script))
+                        d += tags.script(util.raw(keybinding_script()))
                         with open(f"{dir}/target scores/Target Scores {target} {start_utc}.html", "w") as f:
                             f.write(d.render())
 
+
+def make_categorical_scores(tl: tlc.TargetList, pl: pr.PriorityList, other_files: dict[str, str], dir: str = "html") -> None:
     # make pages for categorical priorities
     if pl and pl.categorical_priorities:
         start_times = [f"{pt.index[0]:%Y-%m-%d}" for pt in pl.categorical_priorities]
@@ -479,19 +475,21 @@ def render_observing_pages(tl: tlc.TargetList, pl: pr.PriorityList, other_files:
                     d.head += tags.a("<-Prev", href=f"Categorical Priorities {start_times[i - 1]}.html", id="prevDay")
                 else:
                     d.head += tags.span("<-Prev")
-                d.head += horizontal_space
+                d.head += horizontal_space()
                 if i < len(start_times) - 1:
                     d.head += tags.a("Next->", href=f"Categorical Priorities {start_times[i + 1]}.html", id="nextDay")
                 else:
                     d.head += tags.span("Next->")
-                d.head += horizontal_space
+                d.head += horizontal_space()
                 d.head += tags.a("Numerical Priorities", href=f"Numerical Priorities {start_utc}.html", id="numerical")
-                d.head += horizontal_space
+                d.head += horizontal_space()
                 d.head += tags.a("Summary Page", href="index.html", id="summary")
-                d += tags.script(util.raw(keybinding_script))
+                d += tags.script(util.raw(keybinding_script()))
                 with open(f"{dir}/Categorical Priorities {start_utc}.html", "w") as f:
                     f.write(d.render())
 
+
+def make_target_pages(tl: tlc.TargetList, pl: pr.PriorityList, other_files: dict[str, str], dir: str = "html") -> None:
     # make pages for each individual target
     desired_columns = ["RA", "Dec", "RA HMS", "Dec DMS", "Vmag", "Teff", "Distance"]
     columns = [item for item in desired_columns if item in tl.target_list.columns]
@@ -500,7 +498,7 @@ def render_observing_pages(tl: tlc.TargetList, pl: pr.PriorityList, other_files:
         target_name = row["Target Name"]
         with dominate.document(title=target_name) as d:
             d += tags.h1(f"{target_name} Target Details", style="text-align: center")
-            with tags.table(border=border, cellpadding=padding) as t:
+            with tags.table(border=cell_border(), cellpadding=cell_padding()) as t:
                 tags.tr([tags.th(item) for item in columns])
                 tags.tr([tags.td(value) for value in row[columns]])
                 d += t
@@ -514,7 +512,7 @@ def render_observing_pages(tl: tlc.TargetList, pl: pr.PriorityList, other_files:
             ]
             for other_table in other_tables:
                 ot = tl.other_lists[other_table]
-                ot = ot.sort_values(["Target Name"] + ot.columns[0:3].to_list())
+                # ot = ot.sort_values(["Target Name"] + ot.columns[0:3].to_list())
                 if ot.index.name == "Target Name":
                     if target_name in ot.index:
                         entries = ot.loc[[target_name]].reset_index(drop=True)
@@ -540,16 +538,41 @@ def render_observing_pages(tl: tlc.TargetList, pl: pr.PriorityList, other_files:
                     }
 
                     d += util.raw(dataframe_to_datatable(entries, other_table, table_options))
-                    # d += util.raw(entries.style.hide(axis="index").set_table_styles(table_styles).to_html())
                 else:
                     d += tags.span("(Empty Table)")
 
-            d.head += horizontal_space
+            d.head += horizontal_space()
             d.head += tags.a("Summary Page", href="../index.html", id="summary")
-            d += tags.script(util.raw(keybinding_script))
+            d += tags.script(util.raw(keybinding_script()))
             d.footer += standard_footer()
             with open(f"{dir}/targets/{target_name}.html", "w") as f:
                 f.write(d.render())
+
+
+def render_observing_pages(tl: tlc.TargetList, pl: pr.PriorityList, other_files: dict[str, str], dir: str = "html") -> str:
+    # wipe out contents of dir
+    dir_cleared = False
+    fail_count = 0
+    while not dir_cleared:
+        try:
+            shutil.rmtree(dir)
+            dir_cleared = True
+        except FileNotFoundError:
+            break  # don't care if directory didn't already exist
+        except PermissionError as e:
+            # try again many times if permission error while removing directory (due to Dropbox file sync lock issue)
+            fail_count += 1
+            if fail_count > 50:
+                raise PermissionError(f"Tried {fail_count} times", e)
+    pathlib.Path(f"{dir}/targets").mkdir(parents=True)
+    if pl:
+        pathlib.Path(f"{dir}/target scores").mkdir(parents=True)
+
+    make_summary_page(tl, pl, other_files, dir)
+    make_target_list(tl, pl, other_files, dir)
+    make_numerical_scores_pages(tl, pl, other_files, dir)
+    make_categorical_scores(tl, pl, other_files, dir)
+    make_target_pages(tl, pl, other_files, dir)
 
 
 from playwright.sync_api import sync_playwright
