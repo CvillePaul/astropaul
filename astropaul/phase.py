@@ -36,7 +36,7 @@ class PhaseEvent:
         return PhaseEvent(self.jd, self.system, self.member, self.orbit, self.type, self.phase)
 
     def to_list(self) -> list:
-        return [self.system, self.member, self.orbit, self.jd, self.phase, self.type]
+        return [self.system, self.member, self.orbit, str(self.jd), self.phase, self.type]
 
 
 @dataclass

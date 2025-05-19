@@ -305,8 +305,8 @@ def prioritize_phase_sequence(
             target_table[priority_column] = 0.0
             segment_events = phase_events[
                 (phase_events["Target Name"] == target_name)
-                & (phase_events["Beg JD"] >= segment_beg.jd)
-                & (phase_events["End JD"] <= segment_end.jd)
+                & (phase_events["Beg JD"] >= str(segment_beg.jd))
+                & (phase_events["End JD"] <= str(segment_end.jd))
             ]
             segment_sequences = []
             if segment_events.empty or len(segment_events) < sequence_length:
