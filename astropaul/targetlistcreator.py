@@ -190,7 +190,11 @@ def add_lists(tl: TargetList, **kwargs) -> TargetList:
 
 
 def add_phase_events(
-    tl: TargetList, observing_session: ObservingSession, phase_event_defs: list[ph.PhaseEventDef], **kwargs
+    tl: TargetList,
+    observing_session: ObservingSession,
+    phase_event_defs: list[ph.PhaseEventDef],
+    event_types: list[str] = None,
+    **kwargs,
 ) -> TargetList:
     """Calculate what phase events are in effect for each observing segment"""
     verify_step_requirements(tl, {"Ephemerides"})
@@ -200,7 +204,8 @@ def add_phase_events(
     phase_events = pd.DataFrame(
         columns=["Target Name", "System", "Member", "Orbit Num", "Beg JD", "Phase", "Event", "End JD", "Beg UTC", "End UTC"]
     )
-    for target_name, ephem_row in ephem_table.sort_values(["System", "Member"]).iterrows():
+    for _, ephem_row in ephem_table.sort_values(["System", "Member"]).iterrows():
+        target_name = ephem_row["Target Name"]
         ephem = ph.Ephemeris.from_dataframe_row(ephem_row)
         ephems[target_name] = ephems.get(target_name, []) + [ephem]
     for beg, end in observing_session.observing_segments:
@@ -222,10 +227,12 @@ def add_phase_events(
 
                 # populate table with all values except end times
                 for event, end_jd, end_utc in zip(event_list, end_jds, end_utcs):
+                    if event_types and not event.type in event_types:
+                        continue # skip unwanted phase events
                     phase_events.loc[len(phase_events)] = (
-                        [target_name] + event.to_list() + [end_jd, Time(event.jd, format="jd").iso[:19], end_utc]
+                        [target_name] + event.to_list() + [str(end_jd), Time(event.jd, format="jd").iso[:19], end_utc]
                     )
-    answer.other_lists["Phase Events"] = phase_events
+    answer.other_lists["Phase Events"] = phase_events.sort_values(["Beg JD", "Target Name", "System", "Member"])
     return answer
 
 
@@ -427,7 +434,7 @@ def add_system_configuration(
         target_ephem = ephem[ephem["Target Name"] == target_name]
         for system in systems:
             system_ephem = target_ephem[target_ephem["System"] == system]
-            if system_ephem.empty: # this target doesn't have an ephem entry for this system
+            if system_ephem.empty:  # this target doesn't have an ephem entry for this system
                 system_eclipses[system].append("")
                 system_durations[system].append(float("nan"))
                 continue
@@ -435,7 +442,7 @@ def add_system_configuration(
             for _, ephem_row in system_ephem.sort_values("Member").iterrows():
                 member_ephem = ph.Ephemeris.from_dataframe_row(ephem_row)
                 if member_ephem.duration != member_ephem.duration:
-                    continue # skip calculation for members with no duration specified
+                    continue  # skip calculation for members with no duration specified
                 event_list = ph.PhaseEventList.calc_phase_events(
                     member_ephem, phase_event_defs, observation_time, observation_time + member_ephem.period
                 )
@@ -580,9 +587,7 @@ def add_catalogs(tl: TargetList, **kwargs) -> TargetList:
     return answer
 
 
-def add_database_table(
-    tl: TargetList, table_name: str, add_count: bool = True, **kwargs
-) -> TargetList:
+def add_database_table(tl: TargetList, table_name: str, add_count: bool = True, **kwargs) -> TargetList:
     verify_step_requirements(tl)
     answer = tl.copy()
     table_contents = pd.read_sql(f"select * from {table_name};", kwargs["connection"])
