@@ -1,0 +1,62 @@
+[
+    {
+        "name": "Field 1",
+        "raHours": "01:23:45.67",
+        "decDegs": "-01:23:45.6",
+        "telescopes": "Prompt2, Prompt5",
+        "exps": [
+            {
+                "expLength": 60,
+                "filterRequested": "R"
+            },
+            {
+                "expLength": 30,
+                "filterRequested": "V"
+            },
+            {
+                "expLength": 30,
+                "filterRequested": "R"
+            }
+        ]
+    },
+    {
+        "name": "Field 2",
+        "raHours": "12:34:56.78",
+        "decDegs": "-23:45:56.7",
+        "telescopes": "Prompt2, Prompt5",
+        "priority": 1,
+        "exps": [
+            {
+                "expLength": 60,
+                "filterRequested": "R",
+                "telescope": "Prompt5"
+            },
+            {
+                "expLength": 30,
+                "filterRequested": "V"
+            },
+            {
+                "expLength": 30,
+                "filterRequested": "R"
+            }
+        ]
+    },
+    {
+        "name": "Field 3",
+        "raHours": "12:34:56.78",
+        "decDegs": "-23:45:56.7",
+        "priority": 0,
+        "exps": [
+            {
+                "expLength": 40,
+                "filterRequested": "R",
+                "telescope": "Prompt5"
+            },
+            {
+                "expLength": 30,
+                "filterRequested": "V",
+                "telescope": "Prompt2"
+            }
+        ]
+    }
+]
