@@ -23,8 +23,8 @@ def dataframe_to_datatable(
     default_options = {
         "connected": True,
         "paging": False,
-        "maxBytes": 0,
-        "maxColumns": 0,
+        # "maxBytes": 0,
+        # "maxColumns": 0,
         "autoWidth": True,
         "style": "width: auto; float: left; caption-side:bottom;",
         "layout": {"topStart": None, "topEnd": None, "bottomStart": None, "bottomEnd": None},
@@ -43,11 +43,14 @@ def dataframe_to_datatable(
     html += textwrap.dedent(
         f"""
         <style>
-        td {{text-align: center}}
         #{table_id} th {{
             white-space: normal;
             word-wrap: break-word;
             text-align: center;
+        }}
+        #{{table_id}} td {{
+            text-align: center;
+            word-wrap: normal;
         }}
         caption {{
             text-align: left;
@@ -170,7 +173,7 @@ def make_summary_page(tl: tlc.TargetList, pl: pr.PriorityList, other_files: dict
                 columns = [
                     tags.th("Start UTC/JD"),
                     tags.th("Finish UTC/JD"),
-                    tags.th("Observing Hours"),
+                    tags.th("Observing Time"),
                     tags.th("Moon Illumination"),
                     tags.th("Priorities"),
                     tags.th("Priorities"),
@@ -198,7 +201,7 @@ def make_summary_page(tl: tlc.TargetList, pl: pr.PriorityList, other_files: dict
                     columns = [
                         beg_cell,
                         end_cell,
-                        tags.td(f"{(end.jd - beg.jd) * 24:.1f}"),
+                        tags.td(f"{(end - beg).to(u.hour):.1f}"),
                         tags.td(f"{illumination:.2f}"),
                         tags.td(tags.a("Numerical", href=f"Numerical Priorities {beg.iso[:10]}.html", id=numerical_id)),
                         tags.td(tags.a("Categorical", href=f"Categorical Priorities {beg.iso[:10]}.html", id=categorical_id)),
@@ -217,7 +220,7 @@ def make_summary_page(tl: tlc.TargetList, pl: pr.PriorityList, other_files: dict
             with t:
                 tags.tr(tags.th("Category"), tags.th("Count"), tags.th("Members"))
                 for label in pl.category_labels[::-1]:
-                    members = pl.overall_category_members[label]
+                    members = sorted(pl.overall_category_members[label])
                     tags.tr(tags.td(label if label else "(None)"), tags.td(len(members)), tags.td(", ".join(members)))
             d += t
         # write out summary page
@@ -354,6 +357,7 @@ def make_numerical_scores_pages(
                 d.head += horizontal_space()
                 d.head += tags.a("Summary Page", href="index.html", id="summary")
                 d += tags.script(util.raw(keybinding_script()))
+                d.footer += standard_footer()
                 with open(f"{dir}/Numerical Priorities {start_utc}.html", "w") as f:
                     f.write(d.render())
 
@@ -493,7 +497,7 @@ def make_target_pages(tl: tlc.TargetList, pl: pr.PriorityList, other_files: dict
     # make pages for each individual target
     desired_columns = ["RA", "Dec", "RA HMS", "Dec DMS", "Vmag", "Teff", "Distance"]
     columns = [item for item in desired_columns if item in tl.target_list.columns]
-
+    
     for _, row in tl.target_list.iterrows():
         target_name = row["Target Name"]
         with dominate.document(title=target_name) as d:
@@ -506,9 +510,6 @@ def make_target_pages(tl: tlc.TargetList, pl: pr.PriorityList, other_files: dict
                 table_name
                 for table_name, table in tl.other_lists.items()
                 if "Target Name" in list(tl.other_lists[table_name].columns) + [tl.other_lists[table_name].index.name]
-            ]
-            table_styles = [
-                {"selector": "td", "props": [("padding", "10px"), ("border", "1px solid black"), ("text-align", "center")]}
             ]
             for other_table in other_tables:
                 ot = tl.other_lists[other_table]
@@ -536,7 +537,6 @@ def make_target_pages(tl: tlc.TargetList, pl: pr.PriorityList, other_files: dict
                             },
                         },
                     }
-
                     d += util.raw(dataframe_to_datatable(entries, other_table, table_options))
                 else:
                     d += tags.span("(Empty Table)")
