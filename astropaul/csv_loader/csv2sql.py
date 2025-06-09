@@ -5,6 +5,7 @@ from pathlib import Path
 import sys
 
 from astropy.coordinates import Angle
+from astropy.time import Time
 import astropy.units as u
 import networkx as nx
 import pandas as pd
@@ -99,6 +100,7 @@ class TableConfig:
         self.transformations = []
         self.constraints = {}  # key is dependent column, value is foreign (table, column)
         self.constraint_options = set()
+        self.units = {}  # key is column name, value is string name of a class in astropy.units
         specified_transformations = {}  # key is frozen set of input columns, value is transformation class
         if config_file.exists():
             config = configparser.ConfigParser()
@@ -117,6 +119,8 @@ class TableConfig:
             # process things that determine column order, transformations, type
             unspecified_columns = set(example_data.columns)
 
+            if config.has_section("units"):
+                self.units = {string_to_db_style(column_name): unit for column_name, unit in config.items("units")}
             if config.has_section("columns"):
                 for column_name, column_type in config.items("columns"):
                     column_name = string_to_db_style(column_name)
@@ -137,7 +141,6 @@ class TableConfig:
                     ):
                         raise ValueError(f"Unknown column transformer {transformation_name}")
                     transformation_columns = tuple([column_name.lower().strip() for column_name in column_list.split(",")])
-                    # transformation_columns = tuple((column_name.lower().strip() for column_name in column_list.split(",")))
                     specified_transformations[transformation_columns] = transformation_class
                     unspecified_columns.difference_update(transformation_columns)
             # now handle config items dealing with data relations
@@ -183,7 +186,7 @@ def db_style_to_string(name: str) -> str:
     return answer
 
 
-def create_table(metadata, table_config: TableConfig) -> int:
+def create_table(metadata: sa.MetaData, table_config: TableConfig, table_metadata: pd.DataFrame) -> int:
     table_columns = []
     if table_config.has_id_column:
         table_columns.append(sa.Column("id", sa.Integer, primary_key=True, autoincrement=True))
@@ -191,6 +194,8 @@ def create_table(metadata, table_config: TableConfig) -> int:
         for sql_name, sql_type in transformation.get_sql_columns():
             table_columns.append(sa.Column(sql_name, sql_type))
     sa.Table(table_config.table_name, metadata, *table_columns)
+    for column_name, unit in table_config.units.items():
+        table_metadata.loc[len(table_metadata)] = [table_config.table_name, column_name, "unit", unit]
     return len(table_columns)
 
 
@@ -270,6 +275,7 @@ def csv2sql(base_dir: str, outfile: str, verbose: bool = False):
             outfile_path.unlink()
         engine = sa.create_engine(f"sqlite:///{outfile_path}")
         metadata = sa.MetaData()
+        table_metadata = pd.DataFrame(columns=["table_name", "column_name", "value_type", "value"])
 
         # find files by subdir, validate their schemas, and create empty tables
         data_files_by_table = {}  # key is table name, value is list of (filename, DataFrame)
@@ -287,10 +293,14 @@ def csv2sql(base_dir: str, outfile: str, verbose: bool = False):
             config_file = table_dir / f"{table_dir.name}.ini"
             table_config = TableConfig(config_file, data_files[0][1])
             table_configs[table_config.table_name] = table_config
-            num_columns = create_table(metadata, table_config)
+            num_columns = create_table(metadata, table_config, table_metadata)
             if verbose:
                 print(f"Created table {table_name} with {num_columns} columns, {len(table_config.constraints)} constraints")
         metadata.create_all(engine)
+        table_metadata.to_sql("table_metadata", engine, index=False)
+        if verbose:
+            print(f"Created metadata table with {len(table_metadata)} rows")
+
         # load data into the new tables
         table_order = determine_table_order(table_configs)
         for table_name in table_order:
