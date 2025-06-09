@@ -72,7 +72,7 @@ class ObservingSession:
 
     def add_half_day(self, day: str | Time, first_half: bool = True):
         beg, end = self._determine_nighttime(Time(day))
-        mid = Time(beg.jd + ((end.jd - beg.jd) / 2), format="jd")
+        mid = beg + ((end - beg) / 2)
         if first_half:
             self.observing_segments.append((beg, mid))
         else:

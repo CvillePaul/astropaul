@@ -261,10 +261,10 @@ def calculate_phase_priority(pl: PriorityList, phase_defs: list[ph.PhaseEventDef
         for _, row in ephem_rows.iterrows():
             ephem = ph.Ephemeris.from_dataframe_row(row)
             session_beg, session_end = pl.session.time_range
-            event_list = ph.PhaseEventList.calc_phase_events(ephem, phase_defs, session_beg.jd, session_end.jd)
+            event_list = ph.PhaseEventList.calc_phase_events(ephem, phase_defs, session_beg, session_end)
             # make columns for each system for each observing segment
             for table, segments in zip(table_list, pl.segments):
-                states = [event_list.calc_longest_span(segment_beg.jd, segment_end.jd) for segment_beg, segment_end in segments]
+                states = [event_list.calc_longest_span(segment_beg, segment_end) for segment_beg, segment_end in segments]
                 table[f"Phase System {ephem.system} State"] = states
         # make the overall priority column that considers all available systems
         system_cols = [f"Phase System {system} State" for system in ephem_rows["System"]]
@@ -305,8 +305,8 @@ def prioritize_phase_sequence(
             target_table[priority_column] = 0.0
             segment_events = phase_events[
                 (phase_events["Target Name"] == target_name)
-                & (phase_events["Beg JD"] >= str(segment_beg.jd))
-                & (phase_events["End JD"] <= str(segment_end.jd))
+                & (phase_events["Beg JD"] >= segment_beg)
+                & (phase_events["End JD"] <= segment_end)
             ]
             segment_sequences = []
             if segment_events.empty or len(segment_events) < sequence_length:
@@ -330,8 +330,8 @@ def prioritize_phase_sequence(
             if not allow_overlap:
                 pass  # TODO: remove overlapping segments from sequences list
             for component, sequence_beg, sequence_end in segment_sequences:
-                sequence_beg_ts = pd.Timestamp(Time(sequence_beg, format="jd").to_datetime())
-                sequence_end_ts = pd.Timestamp(Time(sequence_end, format="jd").to_datetime())
+                sequence_beg_ts = pd.Timestamp(sequence_beg.to_datetime())
+                sequence_end_ts = pd.Timestamp(sequence_end.to_datetime())
                 rows = target_table.index[(sequence_beg_ts <= target_table.index) & (target_table.index <= sequence_end_ts)]
                 target_table.loc[rows, sequence_column] = component
                 if (target_table.loc[rows, "Altitude Priority"] > 0).any() or not entirely_observable:
@@ -383,7 +383,8 @@ def prioritize_side_observation(pl: PriorityList, side_state: str = "Eclipse", s
 
     # for each target, build a set of all possible eclipses: dict[target, set[eclipse_type]]
     possible_eclipses = {}
-    for target_name, row in pl.target_list.other_lists["Ephemerides"].iterrows():
+    for _, row in pl.target_list.other_lists["Ephemerides"].iterrows():
+        target_name = row["Target Name"]
         eclipse_type = calc_eclipse_type(row)
         target_possibilities = possible_eclipses.get(target_name, set())
         target_possibilities.add(eclipse_type)
@@ -392,7 +393,7 @@ def prioritize_side_observation(pl: PriorityList, side_state: str = "Eclipse", s
     # build a dictionary that lists all eclipse types already observed in prior speckle sessions: dict[target, set[eclipse_type]]
     prior_observations = {}
     for _, row in pl.target_list.other_lists["SIDE Observations"].iterrows():
-        target_name = str(row.name)
+        target_name = row["Target Name"]
         eclipse_type = calc_eclipse_type(row)
         target_observed = prior_observations.get(target_name, set())
         target_observed.add(eclipse_type)
