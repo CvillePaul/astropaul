@@ -202,7 +202,18 @@ def add_phase_events(
     answer = tl.copy()
     ephems = {}
     phase_events = pd.DataFrame(
-        columns=["Target Name", "System", "Member", "Orbit Num", "Beg JD", "Phase", "Event", "End JD", "Beg UTC", "End UTC"]
+        columns=[
+            "Target Name",
+            "System",
+            "Member",
+            "Orbit Num",
+            "Beg JD",
+            "Phase",
+            "Event",
+            "End JD",
+            "Beg UTC",
+            "End UTC",
+        ]
     )
     for _, ephem_row in ephem_table.sort_values(["System", "Member"]).iterrows():
         target_name = ephem_row["Target Name"]
@@ -211,28 +222,30 @@ def add_phase_events(
     for beg, end in observing_session.observing_segments:
         for target_name, ephem_list in ephems.items():
             for ephem in ephem_list:
-                event_list = ph.PhaseEventList.calc_phase_events(ephem, phase_event_defs, beg.jd, end.jd).events
-                event_list[0].jd = beg.jd  # treat first event as if it had started at segment beginning
+                event_list = ph.PhaseEventList.calc_phase_events(ephem, phase_event_defs, beg, end).events
+                event_list[0].time = beg  # treat first event as if it had started at segment beginning
                 # set end time equal to begin time of next event, or if last event to segment end
                 num_events = len(event_list)
                 end_jds = [0.0] * num_events
                 end_utcs = [""] * num_events
                 for i in range(num_events):
                     if i == num_events - 1:
-                        end_jd = end.jd
+                        this_end = end # make sure we don't go past end of observing segment
                     else:
-                        end_jd = event_list[i + 1].jd
-                    end_jds[i] = end_jd
-                    end_utcs[i] = Time(end_jd, format="jd").iso[:19]
+                        this_end = event_list[i + 1].time
+                    end_jds[i] = this_end
+                    end_utcs[i] = Time(this_end, format="jd").iso[:19]
 
                 # populate table with all values except end times
-                for event, end_jd, end_utc in zip(event_list, end_jds, end_utcs):
+                for event, this_end, end_utc in zip(event_list, end_jds, end_utcs):
                     if event_types and not event.type in event_types:
-                        continue # skip unwanted phase events
+                        continue  # skip unwanted phase events
                     phase_events.loc[len(phase_events)] = (
-                        [target_name] + event.to_list() + [str(end_jd), Time(event.jd, format="jd").iso[:19], end_utc]
+                        [target_name]
+                        + event.to_list()
+                        + [this_end, event.time.iso[:19] if event.time else "", end_utc]
                     )
-    answer.other_lists["Phase Events"] = phase_events.sort_values(["Beg JD", "Target Name", "System", "Member"])
+    answer.other_lists["Phase Events"] = phase_events.sort_values(["Target Name", "System", "Member", "Beg JD"])
     return answer
 
 
@@ -360,6 +373,7 @@ def filter_targets(
     code = inspect.getsource(criteria).strip()
     if (prefix := code.find("criteria=")) > 0:
         code = code[prefix + 9 :]  # try to isolate the code of the lambda function passed in
+    # replace local variables used in the lambda function with their values
     for variable in criteria.__code__.co_names:
         if value := __main__.__dict__.get(variable, None):
             code = code.replace(variable, repr(value))
@@ -402,12 +416,13 @@ def add_dssi_phase(tl: TargetList, phase_event_defs: list[ph.PhaseEventDef], **k
 
 
 def add_system_configuration(
-    tl: TargetList, table_name: str, time_column: str, time_format: str = "jd", **kwargs
+    tl: TargetList, table_name: str, time_column: str, eclipse_table: str = None, **kwargs
 ) -> TargetList:
     """For the specified table, add a pair of columns indicating the state of each system of the target.
-    For these calculations, the specified column gives the time, and must be in the specified format.
+    For these calculations, the specified column contains astropy Time objects to use.
     For a system in eclipse, show what member and the percentage of the time between ingress and egress.
-    For a system not in eclipse, show the percent of phase, where 0.0 is mid eclipse of the a member."""
+    For a system not in eclipse, show the percent of phase, where 0.0 is mid eclipse of the a member.
+    If `eclipse_table` is specified, add a table of all observations occurring during eclipse."""
     verify_step_requirements(tl, {table_name})
     table = tl.other_lists[table_name]
     for col in ["Target Name", time_column]:
@@ -424,13 +439,16 @@ def add_system_configuration(
         ph.PhaseEventDef("Not in Eclipse", partial(ph.calc_time_of_gress, ingress=False)),
         ph.PhaseEventDef("Eclipse", partial(ph.calc_time_of_gress, ingress=True)),
     ]
+    # create a separate table of observations made during eclipse to add to answer if requested
+    eclipse_observations = pd.DataFrame(columns=["Target Name", "Mid JD", "Mid UTC", "System", "Member", "SIDE Type"])
+    # categorize all observation rows
     system_eclipses, system_durations = {}, {}
     for system in systems:
         system_eclipses[system] = []
         system_durations[system] = []
     for _, row in table.iterrows():
         target_name = row["Target Name"]
-        observation_time = Time(row[time_column], format=time_format).jd
+        observation_time = row[time_column]
         target_ephem = ephem[ephem["Target Name"] == target_name]
         for system in systems:
             system_ephem = target_ephem[target_ephem["System"] == system]
@@ -450,9 +468,19 @@ def add_system_configuration(
                     raise ValueError(f"Unexpected event list {event_list}")
                 if event_list.events[0].type == "Eclipse":
                     system_eclipses[system].append(f"{system}{ephem_row["Member"]}")
-                    duration_percent = 1 - (event_list.events[1].jd - observation_time) / member_ephem.duration * 24
+                    duration_percent = 1 - ((event_list.events[1].time - observation_time) / member_ephem.duration).to(
+                        u.dimensionless_unscaled
+                    )
                     system_durations[system].append(duration_percent)
                     eclipse_found = True
+                    eclipse_observations.loc[len(eclipse_observations)] = [
+                        target_name,
+                        observation_time.jd,
+                        observation_time.iso[:19],
+                        ephem_row["System"],
+                        ephem_row["Member"],
+                        "Real duration" if member_ephem.duration == member_ephem.duration else "Synthetic duration",
+                    ]
                     break
             if not eclipse_found:
                 system_eclipses[system].append("")
@@ -461,6 +489,8 @@ def add_system_configuration(
         table[f"System {system} Eclipse"] = system_eclipses[system]
         table[f"System {system} Duration Percent"] = system_durations[system]
     answer.other_lists[table_name] = table
+    if eclipse_table:
+        answer.other_lists[eclipse_table] = eclipse_observations
     return answer
 
 
@@ -496,10 +526,9 @@ def add_side_status(
                     ephem_row["System"],
                     ephem_row["Member"],
                     side_type,
-                    side_type,
                 ]
+    answer.other_lists["SIDE Observations"] = side_observations.sort_values(["Target Name", "System", "Member", "Mid JD"])
     if not side_observations.empty:
-        answer.other_lists["SIDE Observations"] = side_observations.sort_values(["Target Name", "System", "Member", "JD Mid"])
         side_counts = side_observations.groupby("Target Name").size()
         side_counts.name = "Num SIDE"
         answer.target_list = answer.target_list.merge(side_counts, on="Target Name", how="left")
@@ -590,13 +619,23 @@ def add_catalogs(tl: TargetList, **kwargs) -> TargetList:
 def add_database_table(tl: TargetList, table_name: str, add_count: bool = True, **kwargs) -> TargetList:
     verify_step_requirements(tl)
     answer = tl.copy()
-    table_contents = pd.read_sql(f"select * from {table_name};", kwargs["connection"])
+    conn = kwargs["connection"]
+    table_contents = pd.read_sql(f"select * from {table_name};", conn)
+    # apply any transformations, such as units
+    table_metadata = pd.read_sql(f"select column_name, value from table_metadata where table_name = '{table_name}';", conn)
+    for column_name, unit in table_metadata[["column_name", "value"]].values:
+        match unit:
+            case "JD":
+                table_contents[column_name] = [Time(jd, format="jd") for jd in table_contents[column_name]]
+            case _:  # by default, assume the unit is an astropy unit
+                table_contents[column_name] = [u.Quantity(value, unit=unit) for value in table_contents[column_name]]
     convert_columns_to_human_style(table_contents)
     human_name = db_style_to_string(table_name)
+    # for tables that indicate target name, restrict table to targets in this TargetList
     if "Target Name" in table_contents.columns:
         all_targets = list(tl.target_list["Target Name"].unique())
         table_contents = table_contents[table_contents["Target Name"].isin(all_targets)]
-        if add_count:
+        if add_count:  # optionally add a column to the TargetList indicating num rows (in this table) per target
             count_column = f"Num {human_name}"
             counts = table_contents["Target Name"].value_counts()
             answer.target_list[count_column] = answer.target_list["Target Name"].map(counts).fillna(0).astype(int)
