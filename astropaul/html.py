@@ -126,7 +126,7 @@ def make_summary_page(tl: tlc.TargetList, pl: pr.PriorityList, other_files: dict
                 )
                 tags.tr(
                     tags.td("JD Range"),
-                    tags.td(f"{time_range[0].jd} through {time_range[1].jd}"),
+                    tags.td(f"{time_range[0].jd:.4f} through {time_range[1].jd:.4f}"),
                 )
             d += t
         d += tags.br()
@@ -194,10 +194,10 @@ def make_summary_page(tl: tlc.TargetList, pl: pr.PriorityList, other_files: dict
                         categorical_id = "categorical_other"
                     beg_cell = tags.td(beg.iso[:19])
                     beg_cell.add(tags.br())
-                    beg_cell.add(beg.jd)
+                    beg_cell.add(f"{beg.jd:.4f}")
                     end_cell = tags.td(end.iso[:19])
                     end_cell.add(tags.br())
-                    end_cell.add(end.jd)
+                    end_cell.add(f"{end.jd:.4f}")
                     columns = [
                         beg_cell,
                         end_cell,

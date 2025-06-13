@@ -6,6 +6,7 @@ from typing import Any
 
 import astroplan as ap
 from astropy.coordinates import SkyCoord, Angle, get_body
+from astropy.table import Table
 from astropy.time import Time
 import astropy.units as u
 import numpy as np
@@ -292,7 +293,6 @@ def add_observability(
 
     # calculate observability for each time segment of the observing session
     answer = tl.copy()
-    answer.list_criteria.append(f"Observability threshold: {observability_threshold}")
     for constraint in constraints:
         answer.list_criteria.append(f"{constraint.__class__.__name__}: {vars(constraint)}")
     overall_any_night = np.array([False] * len(answer.target_list))
@@ -372,7 +372,7 @@ def filter_targets(
     answer = tl.copy()
     code = inspect.getsource(criteria).strip()
     if (prefix := code.find("criteria=")) > 0:
-        code = code[prefix + 9 :]  # try to isolate the code of the lambda function passed in
+        code = code[prefix + 9 :-2]  # try to isolate the code of the lambda function passed in
     # replace local variables used in the lambda function with their values
     for variable in criteria.__code__.co_names:
         if value := __main__.__dict__.get(variable, None):
@@ -382,6 +382,40 @@ def filter_targets(
         answer.target_list = answer.target_list[~criteria(answer.target_list)]
     else:
         answer.target_list = answer.target_list[criteria(answer.target_list)]
+    answer.list_criteria.append(code)
+    return answer
+
+
+def filter_other_list(tl: TargetList, list_name: str, criteria, inverse: bool = False, **kwargs) -> TargetList:
+    verify_step_requirements(tl, {list_name})
+    answer = tl.copy()
+    other_list = Table.from_pandas(tl.other_lists[list_name])
+    if len(other_list) == 0:
+        return answer
+    code = inspect.getsource(criteria).strip()
+    if (prefix := code.find("criteria=")) > 0:
+        code = f"In table {list_name}: {code[prefix + 9 :-2]}"  # try to isolate the code of the lambda function passed in
+    # replace local variables used in the lambda function with their values
+    for variable in criteria.__code__.co_names:
+        if variable == "u":
+            continue # hacky way to prevent the u alias for astropy.units from looking ugly in output
+        if value := __main__.__dict__.get(variable, None):
+            code = code.replace(variable, repr(value))
+    # convert to astropy table, with each column containing a Quantity having its unit attribute set
+    # all so the dear user can use lambdas like df["col"] > 1.2 * u.arcsec, which isn't possible on dataframes
+    # NOTE: this requires all rows to have EXACTLY the same unit
+    for col in other_list.columns:
+        sample_val = other_list[col][0]
+        if isinstance(sample_val, u.Quantity):
+            unit = sample_val.unit
+            other_list[col] = [val.value for val in other_list[col]]
+            other_list[col].unit = unit
+    mask = criteria(other_list)
+    if inverse:
+        code = "Inverse of: " + code
+        mask = ~mask
+    surviving_targets = set(other_list[mask]["Target Name"])
+    answer.target_list = answer.target_list[tl.target_list["Target Name"].isin(surviving_targets)]
     answer.list_criteria.append(code)
     return answer
 
@@ -491,48 +525,13 @@ def add_system_configuration(
     answer.other_lists[table_name] = table
     if eclipse_table:
         answer.other_lists[eclipse_table] = eclipse_observations
-    return answer
-
-
-def add_side_status(
-    tl: TargetList, phase_event_defs: list[ph.PhaseEventDef], side_state: str = "Eclipse", **kwargs
-) -> TargetList:
-    """Examine all speckle observations and determine which ones occurred during eclipse.
-    `side_state` specifies the name returned by one or more `phase_event_defs` that indicate an eclipse."""
-    verify_step_requirements(tl, {"Ephemerides", "DSSI Observations"})
-    answer = tl.copy()
-    ephem_table = tl.other_lists["Ephemerides"]
-    side_observations = pd.DataFrame(
-        columns=["Target Name", "DSSI Session", "Mid JD", "Mid UTC", "System", "Member", "SIDE Type"]
-    )
-    for target_name, dssi in tl.other_lists["DSSI Observations"].iterrows():
-        ephem_rows = ephem_table[ephem_table["Target Name"] == target_name]
-        if ephem_rows.empty:
-            continue
-        beg, end = dssi["Start JD"], dssi["End JD"]
-        for _, ephem_row in ephem_rows.sort_values(["System", "Member"]).iterrows():
-            ephem = ph.Ephemeris.from_dataframe_row(ephem_row)
-            state = ph.PhaseEventList.calc_phase_events(ephem, phase_event_defs, beg, end).calc_longest_span(beg, end)
-            if state == side_state:
-                if ephem.duration == ephem.duration:
-                    side_type = "Exact"
-                else:
-                    side_type = "Synthetic Duration"
-                side_observations.loc[len(side_observations)] = [
-                    target_name,
-                    int(dssi["DSSI Session"]),
-                    dssi["Mid JD"],
-                    dssi["Mid UTC"],
-                    ephem_row["System"],
-                    ephem_row["Member"],
-                    side_type,
-                ]
-    answer.other_lists["SIDE Observations"] = side_observations.sort_values(["Target Name", "System", "Member", "Mid JD"])
-    if not side_observations.empty:
-        side_counts = side_observations.groupby("Target Name").size()
-        side_counts.name = "Num SIDE"
-        answer.target_list = answer.target_list.merge(side_counts, on="Target Name", how="left")
-        answer.target_list["Num SIDE"] = answer.target_list["Num SIDE"].fillna(0).astype(int)
+        # add a count column to target list indicating how many rows per target in eclipse_table
+        count_column = f"Num {eclipse_table}"
+        counts = eclipse_observations["Target Name"].value_counts()
+        answer.target_list[count_column] = answer.target_list["Target Name"].map(counts).fillna(0).astype(int)
+        primary_columns, secondary_columns = answer.column_groups.get("Count", ([], []))
+        primary_columns.append(count_column)
+        answer.column_groups["Count"] = (primary_columns, secondary_columns)
     return answer
 
 
