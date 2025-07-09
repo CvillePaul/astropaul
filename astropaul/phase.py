@@ -139,7 +139,7 @@ class PhaseEventList:
             answer += "No events\n"
         return answer
 
-    def calc_time_in_spans(self, beg: float, end: float) -> defaultdict[str, float]:
+    def calc_time_in_spans(self, beg: Time, end: Time) -> defaultdict[str, float]:
         """Calculate which event occupied the largest portion of a subsegment of an observing session"""
         if beg < self.beg or end > self.end or end < beg:
             raise ValueError(f"Parameters must be ordered, and within the timeframe {self.beg} to {self.end}")
@@ -148,7 +148,7 @@ class PhaseEventList:
         time_spans = defaultdict(float)
         prev_event = None
         for event in self.events:
-            if not event.time or event.tim < beg:
+            if not event.time or event.time < beg:
                 # initial starting state is given by either most recent event before `beg` or a nan event
                 prev_event = replace(event, time=beg)
                 continue
