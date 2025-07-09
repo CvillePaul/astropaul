@@ -577,6 +577,7 @@ def render_observing_pages(tl: tlc.TargetList, pl: pr.PriorityList, other_files:
 
 from playwright.sync_api import sync_playwright
 
+# import asyncio
 
 def html_to_pdf(input_html_path, output_pdf_path):
     with open(input_html_path, "r") as f:
@@ -588,20 +589,21 @@ def html_to_pdf(input_html_path, output_pdf_path):
     with sync_playwright() as p:
         browser = p.chromium.launch()
         page = browser.new_page()
+        # Letter size in pixels at 96 DPI: 8.5 x 11 inches → 816 x 1056
+        page.set_viewport_size({"width": 816, "height": 1056})
         page.set_content(html_content)
         page.evaluate(
             """
             const table = document.querySelector('table.dataTable'); 
             if (table) {
-                table.style.width = 'auto';
-                table.style.maxWidth = '100%'; 
-                table.style.fontSize = 'smaller';
+                table.style.fontSize = 'small';
             }
         """
         )
         page.pdf(
             path=output_pdf_path,
             format="Letter",
+            margin={"left":"0.4 in"},
             landscape=True,
             print_background=True,
         )
