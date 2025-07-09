@@ -186,7 +186,14 @@ def add_lists(tl: TargetList, **kwargs) -> TargetList:
         ]
         column_name = f"List {target_list}"
         answer.target_list[column_name] = answer.target_list["Target Name"].isin(list_members)
-    answer.column_groups["List"] = ([], [f"List {name}" for name in target_lists])
+    list_columns = [f"List {name}" for name in target_lists]
+    answer.column_groups["List"] = ([], list_columns)
+    # also make a new table indicating all lists to which each target belongs
+    lists_df = answer.target_list[["Target Name"] + list_columns]
+    lists_df = lists_df.melt(id_vars = "Target Name", var_name = "List", value_name = "value")
+    lists_df = lists_df[lists_df["value"]].drop(columns="value")
+    lists_df = lists_df.sort_values(["Target Name", "List"])
+    answer.other_lists["List Memberships"] = lists_df
     return answer
 
 
@@ -231,7 +238,7 @@ def add_phase_events(
                 end_utcs = [""] * num_events
                 for i in range(num_events):
                     if i == num_events - 1:
-                        this_end = end # make sure we don't go past end of observing segment
+                        this_end = end  # make sure we don't go past end of observing segment
                     else:
                         this_end = event_list[i + 1].time
                     end_jds[i] = this_end
@@ -242,9 +249,7 @@ def add_phase_events(
                     if event_types and not event.type in event_types:
                         continue  # skip unwanted phase events
                     phase_events.loc[len(phase_events)] = (
-                        [target_name]
-                        + event.to_list()
-                        + [this_end, event.time.iso[:19] if event.time else "", end_utc]
+                        [target_name] + event.to_list() + [this_end, event.time.iso[:19] if event.time else "", end_utc]
                     )
     answer.other_lists["Phase Events"] = phase_events.sort_values(["Target Name", "System", "Member", "Beg JD"])
     return answer
@@ -372,7 +377,7 @@ def filter_targets(
     answer = tl.copy()
     code = inspect.getsource(criteria).strip()
     if (prefix := code.find("criteria=")) > 0:
-        code = code[prefix + 9 :-2]  # try to isolate the code of the lambda function passed in
+        code = code[prefix + 9 : -2]  # try to isolate the code of the lambda function passed in
     # replace local variables used in the lambda function with their values
     for variable in criteria.__code__.co_names:
         if value := __main__.__dict__.get(variable, None):
@@ -398,7 +403,7 @@ def filter_other_list(tl: TargetList, list_name: str, criteria, inverse: bool = 
     # replace local variables used in the lambda function with their values
     for variable in criteria.__code__.co_names:
         if variable == "u":
-            continue # hacky way to prevent the u alias for astropy.units from looking ugly in output
+            continue  # hacky way to prevent the u alias for astropy.units from looking ugly in output
         if value := __main__.__dict__.get(variable, None):
             code = code.replace(variable, repr(value))
     # convert to astropy table, with each column containing a Quantity having its unit attribute set
@@ -450,12 +455,18 @@ def add_dssi_phase(tl: TargetList, phase_event_defs: list[ph.PhaseEventDef], **k
 
 
 def add_system_configuration(
-    tl: TargetList, table_name: str, time_column: str, eclipse_table: str = None, **kwargs
+    tl: TargetList,
+    table_name: str,
+    time_column: str,
+    synthetic_phase_percent: float = float("nan"),
+    eclipse_table: str = None,
+    **kwargs,
 ) -> TargetList:
     """For the specified table, add a pair of columns indicating the state of each system of the target.
     For these calculations, the specified column contains astropy Time objects to use.
     For a system in eclipse, show what member and the percentage of the time between ingress and egress.
     For a system not in eclipse, show the percent of phase, where 0.0 is mid eclipse of the a member.
+    If `synthetic_phase_percent` is provided it will be used on systems lacking an eclipse duration.
     If `eclipse_table` is specified, add a table of all observations occurring during eclipse."""
     verify_step_requirements(tl, {table_name})
     table = tl.other_lists[table_name]
@@ -470,11 +481,15 @@ def add_system_configuration(
     systems = sorted(ephem["System"].unique())
     # add the desired columns to the table
     phase_event_defs = [
-        ph.PhaseEventDef("Not in Eclipse", partial(ph.calc_time_of_gress, ingress=False)),
-        ph.PhaseEventDef("Eclipse", partial(ph.calc_time_of_gress, ingress=True)),
+        ph.PhaseEventDef(
+            "Not in Eclipse", partial(ph.calc_time_of_gress, ingress=False, synthetic_phase_percent=synthetic_phase_percent)
+        ),
+        ph.PhaseEventDef(
+            "Eclipse", partial(ph.calc_time_of_gress, ingress=True, synthetic_phase_percent=synthetic_phase_percent)
+        ),
     ]
     # create a separate table of observations made during eclipse to add to answer if requested
-    eclipse_observations = pd.DataFrame(columns=["Target Name", "Mid JD", "Mid UTC", "System", "Member", "SIDE Type"])
+    eclipse_observations = pd.DataFrame(columns=["Target Name", "Mid JD", "Mid UTC", "System", "Member", "Type"])
     # categorize all observation rows
     system_eclipses, system_durations = {}, {}
     for system in systems:
@@ -549,8 +564,8 @@ def add_rv_status(tl: TargetList, phase_event_defs: list[ph.PhaseEventDef], **kw
         ephem_rows = ephem_table[ephem_table["Target Name"] == pepsi["Target Name"]]
         if ephem_rows.empty:
             continue
-        exposure_days = pepsi["Exposure Time"] / 24 / 3600  # exposure time is in seconds instead of days
-        beg = pepsi["Mid JD"] - exposure_days / 2
+        exposure_days = pepsi["Exposure Time"]
+        beg = Time(pepsi["Mid JD"], format="jd") - exposure_days / 2
         end = beg + exposure_days
         system_states = []
         for _, system_ephems in ephem_rows.groupby("System"):
