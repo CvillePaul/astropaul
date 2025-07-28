@@ -1,7 +1,9 @@
 import argparse
 import configparser
+from contextlib import contextmanager
 import inspect
 from pathlib import Path
+from sqlite3 import Connection
 import sys
 
 from astropy.coordinates import Angle
@@ -10,6 +12,21 @@ import astropy.units as u
 import networkx as nx
 import pandas as pd
 import sqlalchemy as sa
+
+
+def database_path() -> Path:
+    return Path("../../Data/astropaul.db")
+
+
+@contextmanager
+def database_connection(database_path: str = None):
+    if not database_path:
+        database_path = database_path()
+    conn = Connection(database_path)
+    try:
+        yield conn
+    finally:
+        conn.close()
 
 
 class DataTransformation:
