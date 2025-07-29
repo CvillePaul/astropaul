@@ -12,7 +12,7 @@ import astropy.units as u
 import numpy as np
 import pandas as pd
 
-from astropaul.csv_loader.csv2sql import db_style_to_string
+from astropaul.database import db_style_to_string
 from astropaul.observing import ObservingSession
 import astropaul.phase as ph
 
@@ -190,7 +190,7 @@ def add_lists(tl: TargetList, **kwargs) -> TargetList:
     answer.column_groups["List"] = ([], list_columns)
     # also make a new table indicating all lists to which each target belongs
     lists_df = answer.target_list[["Target Name"] + list_columns]
-    lists_df = lists_df.melt(id_vars = "Target Name", var_name = "List", value_name = "value")
+    lists_df = lists_df.melt(id_vars="Target Name", var_name="List", value_name="value")
     lists_df = lists_df[lists_df["value"]].drop(columns="value")
     lists_df = lists_df.sort_values(["Target Name", "List"])
     answer.other_lists["List Memberships"] = lists_df
@@ -259,15 +259,24 @@ def ancillary_data_from_tess(tl: TargetList, **kwargs) -> TargetList:
     """Add fundamental things like magnitude and effective temperature if available from TESS catalog"""
     answer = tl.copy()
     tess_data = pd.read_sql(
-        """select 'TIC ' || id 'Target Name', pmra 'PM RA', pmdec 'PM Dec', vmag Vmag, teff Teff, plx Parallax, d Distance
-        from tess_ticv8 tt;""",
+        """
+        select cm.target_name, tt.id, tt.pmra 'PM RA', tt.pmdec 'PM Dec', tt.vmag, tt.teff, tt.plx Parallax, tt.d Distance 
+        from tess_ticv8 tt
+        join catalog_members cm on cm.catalog_name = 'TESS TICv8' and cm.catalog_id = tt.id
+        ;
+        """,
         kwargs["connection"],
     )
-    answer.target_list = answer.target_list.merge(tess_data, on="Target Name", how="left")
-    answer.column_groups = {
-        **answer.column_groups,
-        "TESS Data": (["Vmag", "Teff"], ["PM RA", "PM Dec", "Distance", "Parallax"]),
-    }
+    if len(tess_data) > 0:
+        tess_data.drop("id", axis=1, inplace=True)
+        convert_columns_to_human_style(tess_data)
+        answer.target_list = answer.target_list.merge(tess_data, on="Target Name", how="left")
+        answer.column_groups["TESS Data"] = (["Vmag", "Teff"], ["PM RA", "PM Dec", "Distance", "Parallax"])
+    rv_data = pd.read_sql("select * from rv_calibration_targets;", kwargs["connection"])
+    if len(rv_data) > 0:
+        convert_columns_to_human_style(rv_data)
+        answer.target_list = answer.target_list.merge(rv_data, on="Target Name", how="left")
+        answer.column_groups["RV Data"] = (["RV", ], ["RV Err", "Spectral Type"])
     return answer
 
 
@@ -606,7 +615,8 @@ def add_tess_sectors(tl: TargetList, **kwargs) -> TargetList:
     ]
 
 
-def add_catalogs(tl: TargetList, **kwargs) -> TargetList:
+def add_tess_catalog_associations(tl: TargetList, **kwargs) -> TargetList:
+    # use several of the catalog associations available in the TESS results table
     answer = tl.copy()
     conn = kwargs["connection"]
     all_targets = list(tl.target_list["Target Name"].unique())
