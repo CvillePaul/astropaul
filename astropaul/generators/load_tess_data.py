@@ -2,19 +2,23 @@ import argparse
 from glob import glob
 import os
 from pathlib import Path
-from sqlite3 import Connection
 import sys
 
+from astropaul.database import database_connection
 from astroquery.mast import Catalogs
 import pandas as pd
 
 
-def load_tess_data(database: str, out_dir: str, verbose: bool = False) -> None:
+def load_tess_data(database: str = None, out_dir: str = ".", verbose: bool = False) -> None:
     # retrieve all objects by TIC ID from the TIC catalog
     # TIC fields: https://mast.stsci.edu/api/v0/_t_i_cfields.html
-    with Connection(database) as conn:
-        id_list = pd.read_sql("select catalog_id from catalog_members where catalog_name = 'TESS TICv8';", conn)["catalog_id"]
-    id_list = [id.replace("TIC", "").strip() for id in id_list]
+    target_query = "select target_name from targets where target_name like 'TIC %';"
+    catalog_query = "select catalog_id from catalog_members where catalog_name = 'TESS TICv8';"
+    with database_connection(database) as conn:
+        target_names = pd.read_sql(target_query, conn)["target_name"]
+        target_names = [id.replace("TIC", "").strip() for id in target_names]
+        catalog_names = pd.read_sql(catalog_query, conn)["catalog_id"].to_list()
+    id_list = list(set(target_names + catalog_names))
     tic_table = Catalogs.query_criteria(catalog="Tic", ID=id_list)
     # tic_table.rename_column("ID", "Identifier")
     if len(tic_table) != len(id_list):
