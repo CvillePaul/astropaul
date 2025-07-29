@@ -7,22 +7,20 @@ from sqlite3 import Connection
 import sys
 
 from astropy.coordinates import Angle
-from astropy.time import Time
 import astropy.units as u
 import networkx as nx
 import pandas as pd
 import sqlalchemy as sa
-
 
 def database_path() -> Path:
     return Path("../../Data/astropaul.db")
 
 
 @contextmanager
-def database_connection(database_path: str = None):
-    if not database_path:
-        database_path = database_path()
-    conn = Connection(database_path)
+def database_connection(path: str = None):
+    if not path:
+        path = database_path()
+    conn = Connection(path)
     try:
         yield conn
     finally:
@@ -284,10 +282,10 @@ def get_data_files(data_dir: Path) -> list[tuple[str, pd.DataFrame]]:
     return data_files
 
 
-def csv2sql(base_dir: str, outfile: str, verbose: bool = False):
+def csv2sql(base_dir: str, outfile: str=None, verbose: bool=False):
     engine = None
     try:
-        outfile_path = Path(outfile)
+        outfile_path = Path(outfile) if outfile else database_path()
         if outfile_path.exists():
             outfile_path.unlink()
         engine = sa.create_engine(f"sqlite:///{outfile_path}")
