@@ -257,6 +257,7 @@ def add_phase_events(
 
 def ancillary_data_from_tess(tl: TargetList, **kwargs) -> TargetList:
     """Add fundamental things like magnitude and effective temperature if available from TESS catalog"""
+    verify_step_requirements(tl)
     answer = tl.copy()
     tess_data = pd.read_sql(
         """
@@ -569,7 +570,7 @@ def add_rv_status(tl: TargetList, phase_event_defs: list[ph.PhaseEventDef], **kw
     ephem_table = tl.other_lists["Ephemerides"]
     pepsi_table = tl.other_lists["PEPSI Observations"]
     pepsi_phases = pd.DataFrame(columns=["Target Name", "Start JD", "Start UTC", "State"])
-    for _, pepsi in pepsi_table.iterrows():
+    for idx, pepsi in pepsi_table.iterrows():
         ephem_rows = ephem_table[ephem_table["Target Name"] == pepsi["Target Name"]]
         if ephem_rows.empty:
             continue
@@ -590,15 +591,29 @@ def add_rv_status(tl: TargetList, phase_event_defs: list[ph.PhaseEventDef], **kw
                 system_states.append(system_state)
             else:
                 system_states.append("?")
+        pepsi_table.loc[idx, "RV Status"] = "|".join(system_states)
+        # pepsi_phases.loc[len(pepsi_phases)] = [
+        #     pepsi["Target Name"],
+        #     beg,
+        #     Time(beg, format="jd").iso[:18],
+        #     "|".join(system_states),
+        # ]
+    # if not pepsi_phases.empty:
+    #     answer.other_lists["PEPSI RV Status"] = pepsi_phases
+    answer.other_lists["PEPSI Observations"] = pepsi_table
+    return answer
 
-        pepsi_phases.loc[len(pepsi_phases)] = [
-            pepsi["Target Name"],
-            beg,
-            Time(beg, format="jd").iso[:18],
-            "|".join(system_states),
-        ]
-    if not pepsi_phases.empty:
-        answer.other_lists["PEPSI RV Status"] = pepsi_phases
+
+def add_pepsi_evaluations(tl: TargetList, **kwargs) -> TargetList:
+    table_name = "PEPSI Observations"
+    verify_step_requirements(tl, {table_name})
+    answer = tl.copy()
+    evaluations = pd.read_sql("select * from pepsi_evaluations;", kwargs["connection"])
+    if len(evaluations) > 0:
+        convert_columns_to_human_style(evaluations)
+        pepsi_observations = answer.other_lists[table_name]
+        pepsi_observations = pepsi_observations.merge(evaluations, on="Spectrum File", how="left")
+        answer.other_lists[table_name] = pepsi_observations
     return answer
 
 
