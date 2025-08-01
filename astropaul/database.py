@@ -13,7 +13,7 @@ import pandas as pd
 import sqlalchemy as sa
 
 def database_path() -> Path:
-    return Path("../../Data/astropaul.db")
+    return Path("/Users/User/Dropbox/Astro/Data/astropaul.db")
 
 
 @contextmanager
@@ -116,6 +116,7 @@ class TableConfig:
         self.constraints = {}  # key is dependent column, value is foreign (table, column)
         self.constraint_options = set()
         self.units = {}  # key is column name, value is string name of a class in astropy.units
+        self.metadata = None
         specified_transformations = {}  # key is frozen set of input columns, value is transformation class
         if config_file.exists():
             config = configparser.ConfigParser()
@@ -131,11 +132,15 @@ class TableConfig:
                 self.constraint_options = set([option.lower().strip() for option in constraint_policy.split(",")])
                 if len(self.constraint_options) > 0 and not self.constraint_options.issubset(all_constraint_options):
                     raise ValueError(f"Constraint policy in {config_file} must be subset of: {all_constraint_options}")
-            # process things that determine column order, transformations, type
-            unspecified_columns = set(example_data.columns)
-
+            if self.table_name:
+                pass
+            if config.has_section("metadata"):
+                self.metadata = {key: value for key, value in config.items("metadata")}
             if config.has_section("units"):
                 self.units = {string_to_db_style(column_name): unit for column_name, unit in config.items("units")}
+
+            # process things that determine column order, transformations, type
+            unspecified_columns = set(example_data.columns)
             if config.has_section("columns"):
                 for column_name, column_type in config.items("columns"):
                     column_name = string_to_db_style(column_name)
@@ -209,8 +214,13 @@ def create_table(metadata: sa.MetaData, table_config: TableConfig, table_metadat
         for sql_name, sql_type in transformation.get_sql_columns():
             table_columns.append(sa.Column(sql_name, sql_type))
     sa.Table(table_config.table_name, metadata, *table_columns)
+    # write info from ini file about units to the metadata table
     for column_name, unit in table_config.units.items():
         table_metadata.loc[len(table_metadata)] = [table_config.table_name, column_name, "unit", unit]
+    # write metadata from the ini file to the metadata table
+    if table_config.metadata:
+        for metadata_field, metadata_value in table_config.metadata.items():
+            table_metadata.loc[len(table_metadata)] = [table_config.table_name, None, metadata_field, metadata_value]
     return len(table_columns)
 
 
