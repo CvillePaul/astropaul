@@ -277,7 +277,10 @@ def ancillary_data_from_tess(tl: TargetList, **kwargs) -> TargetList:
     if len(rv_data) > 0:
         convert_columns_to_human_style(rv_data)
         answer.target_list = answer.target_list.merge(rv_data, on="Target Name", how="left")
-        answer.column_groups["RV Data"] = (["RV", ], ["RV Err", "Spectral Type"])
+        answer.column_groups["RV Data"] = (
+            ["RV"],
+            ["RV Err", "Spectral Type"],
+        )
     return answer
 
 
@@ -661,7 +664,9 @@ def add_database_table(tl: TargetList, table_name: str, add_count: bool = True, 
     conn = kwargs["connection"]
     table_contents = pd.read_sql(f"select * from {table_name};", conn)
     # apply any transformations, such as units
-    table_metadata = pd.read_sql(f"select column_name, value from table_metadata where table_name = '{table_name}';", conn)
+    table_metadata = pd.read_sql(
+        f"select column_name, value from table_metadata where table_name = '{table_name}' and value_type='unit';", conn
+    )
     for column_name, unit in table_metadata[["column_name", "value"]].values:
         match unit:
             case "JD":
