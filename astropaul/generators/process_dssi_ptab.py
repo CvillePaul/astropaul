@@ -3,6 +3,7 @@ from pathlib import Path
 import re
 from sqlite3 import Connection
 
+from astropaul.database import database_path
 from astropy.coordinates import SkyCoord
 from astropy.time import Time, TimeDelta
 import astropy.units as u
@@ -53,6 +54,7 @@ def process_dssi_ptab_file(
             if not (match := re.match(ptab_data_line, line)):
                 continue
             fields = match.groupdict()
+            # fields["notes"] = "uncalibrated"
             # use coordinates in file & coords of known targets as crosscheck of stated target id
             ra = f"{fields["ra"][:2]}:{fields["ra"][2:4]}:{int(fields["ra"][4:5])/60:.0f}"
             dec = f"{fields["dec"][:3]}:{fields["dec"][3:5]}:00"
@@ -94,6 +96,8 @@ def process_dssi_ptab_file(
 
 
 def process_dssi_ptab_files(files: list[str], out_dir: str = ".", database: str = None, verbose: bool = False) -> None:
+    if not database:
+        database = database_path()
     with Connection(database) as conn:
         targets = pd.read_sql("select * from targets;", conn)
         target_names = targets["target_name"]
