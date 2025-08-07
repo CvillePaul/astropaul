@@ -2,7 +2,7 @@ from collections import defaultdict
 from collections.abc import Callable
 from dataclasses import dataclass, replace
 
-from astropy.time import Time
+from astropy.time import Time, TimeDelta
 import astropy.units as u
 import pandas as pd
 
@@ -145,7 +145,7 @@ class PhaseEventList:
             raise ValueError(f"Parameters must be ordered, and within the timeframe {self.beg} to {self.end}")
         if not self.events:
             raise ValueError("This list has no events")
-        time_spans = defaultdict(float)
+        time_spans = defaultdict(lambda: TimeDelta(0 * u.day))
         prev_event = None
         for event in self.events:
             if not event.time or event.time < beg:
