@@ -6,6 +6,7 @@ import os
 import re
 from sqlite3 import connect
 
+from astropaul.database import database_path
 from astropy.coordinates import SkyCoord
 from astropy.table import Table
 from astropy.time import Time
@@ -13,7 +14,7 @@ import astropy.units as u
 import pandas as pd
 
 wavelengths_optical = "692, 880"
-wavelengths_ir = "1450"
+wavelengths_ir = "1500"
 
 
 def get_file_contents(file: str) -> tuple[datetime, list[str]]:
@@ -230,11 +231,10 @@ def parse_olist_files(files: list[str], out_dir: str = ".", database: str = None
     overall_observation_types = Counter()
     overall_failed_lines = {}
     session_num = 0
-    if database:
-        with connect(database) as conn:
-            known_targets = pd.read_sql("select target_name, ra, dec from targets;", conn)
-    else:
-        known_targets = pd.DataFrame()
+    if not database:
+        database = database_path()
+    with connect(database) as conn:
+        known_targets = pd.read_sql("select target_name, ra, dec from targets;", conn)
     for file_pattern in files:
         for specific_file in glob(file_pattern):
             observation_date, dssi_observations, observation_types, failed_lines, _ = parse_olist_file(specific_file, known_targets, session_num)
