@@ -48,7 +48,7 @@ def dataframe_to_datatable(
             word-wrap: break-word;
             text-align: center;
         }}
-        #{{table_id}} td {{
+        #{table_id} td {{
             text-align: center;
             word-wrap: normal;
         }}
@@ -495,21 +495,33 @@ def make_categorical_scores(tl: tlc.TargetList, pl: pr.PriorityList, other_files
 
 def make_target_pages(tl: tlc.TargetList, pl: pr.PriorityList, other_files: dict[str, str], dir: str = "html") -> None:
     # make pages for each individual target
-    desired_columns = ["RA", "Dec", "RA HMS", "Dec DMS", "Vmag", "Teff", "Distance"]
-    columns = [item for item in desired_columns if item in tl.target_list.columns]
-    
+
     for _, row in tl.target_list.iterrows():
         target_name = row["Target Name"]
         with dominate.document(title=target_name) as d:
             d += tags.h1(f"{target_name} Target Details", style="text-align: center")
+            with tags.table(cellpadding=cell_padding()) as t:
+                tags.tr([tags.td("Target Type"), tags.td(row['Target Type'])])
+                tags.tr([tags.td("Source"), tags.td(row['Source'])])
+                list_memberships_name = "List Memberships"
+                if list_memberships_name in tl.other_lists.keys():
+                    list_memberships = tl.other_lists[list_memberships_name]
+                    lists = list_memberships[list_memberships["Target Name"] == target_name]["List"].to_list()
+                    if lists:
+                        tags.tr([tags.td(list_memberships_name), tags.td(", ".join([list[5:] for list in lists]))])
+                d += t
+            d += tags.div(style="margin-bottom: 40px;")
             with tags.table(border=cell_border(), cellpadding=cell_padding()) as t:
+                desired_columns = ["RA", "Dec", "RA HMS", "Dec DMS", "Vmag", "Teff", "Distance"]
+                columns = [item for item in desired_columns if item in tl.target_list.columns]
                 tags.tr([tags.th(item) for item in columns])
                 tags.tr([tags.td(value) for value in row[columns]])
                 d += t
             other_tables = [
                 table_name
-                for table_name, table in tl.other_lists.items()
+                for table_name in tl.other_lists.keys()
                 if "Target Name" in list(tl.other_lists[table_name].columns) + [tl.other_lists[table_name].index.name]
+                and table_name != "List Memberships" # skip this because it's handled above
             ]
             for other_table in other_tables:
                 ot = tl.other_lists[other_table]
@@ -521,9 +533,9 @@ def make_target_pages(tl: tlc.TargetList, pl: pr.PriorityList, other_files: dict
                         entries = pd.DataFrame()
                 else:
                     entries = ot[ot["Target Name"] == target_name].drop("Target Name", axis=1)
-                d += tags.h2(f"{other_table} ({len(entries)})")
                 entries = entries.reset_index(drop=True)
                 if not entries.empty:
+                    d += tags.h2(f"{other_table} ({len(entries)})")
                     table_options = {
                         "autowidth": False,
                         "float": "left",
@@ -538,8 +550,8 @@ def make_target_pages(tl: tlc.TargetList, pl: pr.PriorityList, other_files: dict
                         },
                     }
                     d += util.raw(dataframe_to_datatable(entries, other_table, table_options))
-                else:
-                    d += tags.span("(Empty Table)")
+                # else:
+                #     d += tags.span("(Empty Table)")
 
             d.head += horizontal_space()
             d.head += tags.a("Summary Page", href="../index.html", id="summary")
@@ -579,6 +591,7 @@ from playwright.sync_api import sync_playwright
 
 # import asyncio
 
+
 def html_to_pdf(input_html_path, output_pdf_path):
     with open(input_html_path, "r") as f:
         html_content = f.read()
@@ -603,7 +616,7 @@ def html_to_pdf(input_html_path, output_pdf_path):
         page.pdf(
             path=output_pdf_path,
             format="Letter",
-            margin={"left":"0.4 in"},
+            margin={"left": "0.4 in"},
             landscape=True,
             print_background=True,
         )
