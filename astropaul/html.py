@@ -23,8 +23,8 @@ def dataframe_to_datatable(
     default_options = {
         "connected": True,
         "paging": False,
-        # "maxBytes": 0,
-        # "maxColumns": 0,
+        "maxBytes": 0,
+        "maxColumns": 0,
         "autoWidth": True,
         "style": "width: auto; float: left; caption-side:bottom;",
         "layout": {"topStart": None, "topEnd": None, "bottomStart": None, "bottomEnd": None},
@@ -38,7 +38,7 @@ def dataframe_to_datatable(
         column_defs = {}
     table_id = table_id.replace(" ", "_")
     html = itables.to_html_datatable(
-        df=table, table_id=table_id, **{**default_options, **table_options}, columnDefs=column_defs
+        df=table, table_id=table_id, **{**default_options, **table_options}, columnDefs=column_defs,
     )
     html += textwrap.dedent(
         f"""
@@ -560,8 +560,10 @@ def make_target_pages(tl: tlc.TargetList, pl: pr.PriorityList, other_files: dict
             with open(f"{dir}/targets/{target_name}.html", "w") as f:
                 f.write(d.render())
 
+def output_directory() -> pathlib.Path:
+    return pathlib.Path("/Users/User/Dropbox/Astro/Observing Files")
 
-def render_observing_pages(tl: tlc.TargetList, pl: pr.PriorityList, other_files: dict[str, str], dir: str = "html") -> str:
+def clear_directory(dir: str) -> None:
     # wipe out contents of dir
     dir_cleared = False
     fail_count = 0
@@ -576,6 +578,10 @@ def render_observing_pages(tl: tlc.TargetList, pl: pr.PriorityList, other_files:
             fail_count += 1
             if fail_count > 50:
                 raise PermissionError(f"Tried {fail_count} times", e)
+
+
+def render_observing_pages(tl: tlc.TargetList, pl: pr.PriorityList, other_files: dict[str, str], dir: str = "html") -> str:
+    clear_directory(dir)
     pathlib.Path(f"{dir}/targets").mkdir(parents=True)
     if pl:
         pathlib.Path(f"{dir}/target scores").mkdir(parents=True)
