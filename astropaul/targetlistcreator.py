@@ -1,4 +1,5 @@
 import collections
+import datetime
 from functools import partial
 import inspect
 from sqlite3 import Connection
@@ -117,7 +118,7 @@ class TargetListCreator:
         for step in steps:
             intermediate_tl = step(intermediate_tl, **merged_kwargs)
             if verbose:
-                print(f"{len(intermediate_tl.target_list):4d} targets, {step=}")
+                print(f"{len(intermediate_tl.target_list):4d} targets, {datetime.datetime.now()}, {step=}")
         if verbose:
             print(intermediate_tl.summarize())
         return intermediate_tl
@@ -256,31 +257,31 @@ def add_phase_events(
 
 
 def ancillary_data_from_tess(tl: TargetList, **kwargs) -> TargetList:
-    """Add fundamental things like magnitude and effective temperature if available from TESS catalog"""
+    """Add fundamental things like magnitude and effective temperature, if available, from TESS catalog"""
     verify_step_requirements(tl)
     answer = tl.copy()
-    tess_data = pd.read_sql(
-        """
-        select cm.target_name, tt.id, tt.pmra 'PM RA', tt.pmdec 'PM Dec', tt.vmag, tt.teff, tt.plx Parallax, tt.d Distance 
-        from tess_ticv8 tt
-        join catalog_members cm on cm.catalog_name = 'TESS TICv8' and cm.catalog_id = tt.id
-        ;
-        """,
-        kwargs["connection"],
-    )
+    tess_data = pd.read_sql("select * from tess_ticv8;", kwargs["connection"])
     if len(tess_data) > 0:
-        tess_data.drop("id", axis=1, inplace=True)
         convert_columns_to_human_style(tess_data)
         answer.target_list = answer.target_list.merge(tess_data, on="Target Name", how="left")
-        answer.column_groups["TESS Data"] = (["Vmag", "Teff"], ["PM RA", "PM Dec", "Distance", "Parallax"])
-    rv_data = pd.read_sql("select * from rv_calibration_targets;", kwargs["connection"])
-    if len(rv_data) > 0:
-        convert_columns_to_human_style(rv_data)
-        answer.target_list = answer.target_list.merge(rv_data, on="Target Name", how="left")
-        answer.column_groups["RV Data"] = (
-            ["RV"],
-            ["RV Err", "Spectral Type"],
-        )
+        primary_columns = ["Vmag", "Teff"]
+        secondary_columns = [col for col in tess_data.columns if not col in primary_columns + ["Target Name"]]
+        answer.column_groups["TESS Data"] = (primary_columns, secondary_columns)
+    return answer
+
+
+def add_columns_from_sql(tl: TargetList, table_name: str, primary_cols: list[str], **kwargs) -> TargetList:
+    """Join columns from another table to the target list.  Other table must have a Target Name column."""
+    verify_step_requirements(tl)
+    answer = tl.copy()
+    other_table = pd.read_sql(f"select * from {table_name};", kwargs["connection"])
+    if not other_table.empty:
+        convert_columns_to_human_style(other_table)
+        if not "Target Name" in other_table.columns:
+            raise ValueError(f"Table {table_name} must have a column named Target Name") 
+        secondary_cols = [col for col in other_table.columns if col not in primary_cols + ["Target Name"]]
+        answer.target_list = answer.target_list.merge(other_table, on="Target Name", how="left")
+        answer.column_groups[db_style_to_string(table_name)] = (primary_cols, secondary_cols)
     return answer
 
 
@@ -643,7 +644,7 @@ def add_tess_catalog_associations(tl: TargetList, **kwargs) -> TargetList:
         """
         select cm.target_name, tt.gaia 'GAIA DR2', hip, twomass
         from catalog_members cm
-        join tess_ticv8 tt on tt.id = cm.catalog_id
+        join tess_ticv8 tt on tt.tic = cm.catalog_id
         where cm.catalog_name = 'TESS TICv8';
    
     """,
