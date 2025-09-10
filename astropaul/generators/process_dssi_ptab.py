@@ -11,7 +11,8 @@ import numpy as np
 import pandas as pd
 
 ptab_data_line = r"""(?x)
-    (?P<ra>\d{5})(?P<dec>[\+-]\d{4})\s+
+    (?P<ra>\d{5})
+    (?P<dec>[\+-]\d{4})\s+
     (?P<filename>\S+)\s+
     (?P<byear>\d\d.\d\d\d\d)\s+
     (?P<red_chisq>[\d\.]+)\s+
@@ -19,9 +20,8 @@ ptab_data_line = r"""(?x)
     (?P<position_angle>[\d\.]+)\s+
     (?P<separation>[\d\.]+)\s+
     (?P<delta_mag>[\d\.]+)\s+
-    (?P<filter>\d+)\s+
-    (?P<target_id>\S+)\s*
-    (?P<notes>\S*)
+    (?P<filter>\d+)\s*
+    (?P<notes>.*)
 """
 
 
@@ -52,18 +52,19 @@ def process_dssi_ptab_file(
     with open(filename) as f:
         for line in f.readlines():
             if not (match := re.match(ptab_data_line, line)):
+                print(f"Skipped: {line}", end="")
                 continue
             fields = match.groupdict()
-            # fields["notes"] = "uncalibrated"
             # use coordinates in file & coords of known targets as crosscheck of stated target id
             ra = f"{fields["ra"][:2]}:{fields["ra"][2:4]}:{int(fields["ra"][4:5])/60:.0f}"
             dec = f"{fields["dec"][:3]}:{fields["dec"][3:5]}:00"
             result_coord = SkyCoord(ra, dec, unit=(u.hourangle, u.deg))
             idx, sep2d, _ = result_coord.match_to_catalog_sky(target_coords, nthneighbor=1)
             if sep2d[0] > 0.5 * u.deg:
+                print(f"Skipped unmatched target: {result_coord}")
                 continue  # skip unknown targets
             nearest_known_target_name = target_names[idx]
-            if not fields["target_id"] in nearest_known_target_name: # comparing this way avoids assuming all targets are TICs
+            if "target_id" in fields and not fields["target_id"] in nearest_known_target_name: # comparing this way avoids assuming all targets are TICs
                 raise ValueError(f"Target ID {fields["target_id"]} has coordinates closest to {nearest_known_target_name}")
             # replace the less precise byear with the more precise jd from the matching observation row
             byear = fields["byear"]
@@ -106,7 +107,9 @@ def process_dssi_ptab_files(files: list[str], out_dir: str = ".", database: str 
     out_path = Path(out_dir)
     for file_pattern in files:
         for specific_file in glob(file_pattern):
+            print(f"Processing {specific_file}")
             dssi_results = process_dssi_ptab_file(specific_file, target_names, target_coords, observations)
+            dssi_results = dssi_results.sort_values(["Target Name", "Mid UTC"])
             out_file = out_path / Path(specific_file).name.replace(".ptab", ".csv")
             dssi_results.to_csv(out_file, index=False)
             if verbose:
