@@ -60,7 +60,7 @@ def add_rv_calibration_targets(tl: tlc.TargetList, **kwargs) -> tlc.TargetList:
     return answer
 
 
-def assign_rv_standards(tl: tlc.TargetList, **kwargs) -> pd.DataFrame:
+def assign_rv_standards(tl: tlc.TargetList, target_types: set[str], **kwargs) -> pd.DataFrame:
     def find_standard(value: float, standards: pd.DataFrame) -> int:
         closest_idx = (standards["Teff"] - value).abs().idxmin()
         if closest_idx == closest_idx:
@@ -70,12 +70,11 @@ def assign_rv_standards(tl: tlc.TargetList, **kwargs) -> pd.DataFrame:
     answer = tl.copy()
     targets = answer.target_list
     rv_standards = targets[targets["Target Type"] == "RV Standard"]
-    science_targets = set(targets[~targets["Target Type"].isin(["RV Standard", "Telluric Standard"])]["Target Name"])
 
     answer.target_list["RV Standard"] = [
         find_standard(teff, standards=rv_standards)
-        if target_name in science_targets else ""
-        for target_name, teff in targets[["Target Name", "Teff"]].values
+        if target_name in target_types else ""
+        for target_name, teff in targets[["Target Type", "Teff"]].values
     ]
     return answer
 
