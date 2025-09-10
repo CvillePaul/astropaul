@@ -1,5 +1,4 @@
 import argparse
-from glob import glob
 import os
 from pathlib import Path
 import sys
@@ -12,21 +11,24 @@ import pandas as pd
 def load_tess_data(database: str = None, out_dir: str = ".", verbose: bool = False) -> None:
     # retrieve all objects by TIC ID from the TIC catalog
     # TIC fields: https://mast.stsci.edu/api/v0/_t_i_cfields.html
-    target_query = "select target_name from targets where target_name like 'TIC %';"
-    catalog_query = "select catalog_id from catalog_members where catalog_name = 'TESS TICv8';"
+    catalog_query = "select target_name, catalog_id from catalog_members where catalog_name = 'TESS TICv8';"
     with database_connection(database) as conn:
-        target_names = pd.read_sql(target_query, conn)["target_name"]
-        target_names = [id.replace("TIC", "").strip() for id in target_names]
-        catalog_names = pd.read_sql(catalog_query, conn)["catalog_id"].to_list()
-    id_list = list(set(target_names + catalog_names))
-    tic_table = Catalogs.query_criteria(catalog="Tic", ID=id_list)
-    # tic_table.rename_column("ID", "Identifier")
-    if len(tic_table) != len(id_list):
-        raise ValueError(f"Tic query returned {len(tic_table)} instead of {len(id_list)} entries")
+        target_ids = pd.read_sql(catalog_query, conn)
+    tic_table = Catalogs.query_criteria(catalog="Tic", ID=target_ids["catalog_id"]).to_pandas()
+    unique_ids = set(target_ids["catalog_id"])
+    if len(tic_table) != len(unique_ids):
+        raise ValueError(f"Tic query returned {len(tic_table)} instead of {len(unique_ids)} entries")
+    tess_data = target_ids.merge(tic_table, left_on="catalog_id", right_on="ID")
+    tess_data.rename(columns={"target_name": "Target Name", "ID": "TIC", "ra": "TESS RA", "dec": "TESS Dec"}, inplace=True)
+    tess_data.drop(columns=["catalog_id"], inplace=True)
+    # now reorder columns for prettiness
+    first_columns = ["Target Name", "TIC", "Vmag", "Teff"]
+    second_columns = [col for col in tess_data.columns if not col in first_columns]
+    tess_data = tess_data[first_columns + second_columns]
     out_file = Path(out_dir) / "TESS TICv8.csv"
-    tic_table.write(out_file, overwrite=True)
+    tess_data.to_csv(out_file, index=False)
     if verbose:
-        print(f"Wrote {len(tic_table)} rows to {out_file}")
+        print(f"Wrote {len(tess_data)} rows to {out_file}")
 
 
 if __name__ == "__main__":
