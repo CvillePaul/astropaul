@@ -83,6 +83,7 @@ def keybinding_script():
             if (event.key === "t")          { document.getElementById("targets").click(); }
             if (event.key === "j")          { document.getElementById("nextTarget").click(); }
             if (event.key === "k")          { document.getElementById("prevTarget").click(); }
+            if (event.key === "h")          { document.getElementById("home").click(); }
         });
     """
     )
@@ -105,6 +106,7 @@ def cell_padding():
 
 def make_summary_page(tl: tlc.TargetList, pl: pr.PriorityList, other_files: dict[str, str], dir: str = "html") -> None:
     with dominate.document(title=tl.name) as d:
+        d.head += tags.a("Home", href="../index.html", id="home")
         d += tags.h1(tl.name)
         if pl:
             # output information about the observing session
@@ -238,6 +240,8 @@ def make_target_list(tl: tlc.TargetList, pl: pr.PriorityList, other_files: dict[
     with dominate.document(title=title) as d:
         d.head += tags.a("Summary Page", href="index.html", id="summary")
         d += tags.h1(title, style="text-align: center")
+        d.head += horizontal_space()
+        d.head += tags.a("Home", href="../index.html", id="home")
         buttons = [
             {
                 "extend": "columnToggle",
@@ -356,6 +360,8 @@ def make_numerical_scores_pages(
                 d.head += tags.a("Categorical Priorities", href=f"Categorical Priorities {start_utc}.html", id="categorical")
                 d.head += horizontal_space()
                 d.head += tags.a("Summary Page", href="index.html", id="summary")
+                d.head += horizontal_space()
+                d.head += tags.a("Home", href="../index.html", id="home")
                 d += tags.script(util.raw(keybinding_script()))
                 d.footer += standard_footer()
                 with open(f"{dir}/Numerical Priorities {start_utc}.html", "w") as f:
@@ -416,6 +422,8 @@ def make_numerical_scores_pages(
                         )
                         d.head += horizontal_space()
                         d.head += tags.a("Summary Page", href="../index.html", id="summary")
+                        d.head += horizontal_space()
+                        d.head += tags.a("Home", href="../../index.html", id="home")
                         d += tags.script(util.raw(keybinding_script()))
                         with open(f"{dir}/target scores/Target Scores {target} {start_utc}.html", "w") as f:
                             f.write(d.render())
@@ -489,6 +497,8 @@ def make_categorical_scores(tl: tlc.TargetList, pl: pr.PriorityList, other_files
                 d.head += horizontal_space()
                 d.head += tags.a("Summary Page", href="index.html", id="summary")
                 d += tags.script(util.raw(keybinding_script()))
+                d.head += horizontal_space()
+                d.head += tags.a("Home", href="../index.html", id="home")
                 with open(f"{dir}/Categorical Priorities {start_utc}.html", "w") as f:
                     f.write(d.render())
 
@@ -555,6 +565,8 @@ def make_target_pages(tl: tlc.TargetList, pl: pr.PriorityList, other_files: dict
 
             d.head += horizontal_space()
             d.head += tags.a("Summary Page", href="../index.html", id="summary")
+            d.head += horizontal_space()
+            d.head += tags.a("Home", href="../../index.html", id="home")
             d += tags.script(util.raw(keybinding_script()))
             d.footer += standard_footer()
             with open(f"{dir}/targets/{target_name}.html", "w") as f:
