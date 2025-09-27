@@ -27,13 +27,16 @@ class TargetList:
         target_list: pd.DataFrame = None,
         list_criteria: list[str] = None,
         column_groups: dict[str, tuple[list[str], list[str]]] = None,
-        other_lists: dict[str, pd.DataFrame] = {},
+        other_lists: dict[str, pd.DataFrame] = None,
     ):
         self.name = name
         self.target_list = target_list if target_list is not None else pd.DataFrame()
         self.list_criteria = list_criteria or []
         self.column_groups = column_groups or collections.defaultdict(list)
-        self.other_lists = other_lists
+        if not other_lists:
+            self.other_lists = dict()
+        else:
+            self.other_lists = other_lists
 
     def copy(self) -> "TargetList":
         answer = TargetList(
@@ -69,29 +72,6 @@ class TargetList:
         answer += "Associated tables:\n"
         for name, other in self.other_lists.items():
             answer += f"    {len(other):4d} rows, {len(other.columns):2d} columns: {name}\n"
-        return answer
-
-    @classmethod
-    def merge(
-        cls,
-        first: "TargetList",
-        target_list: pd.DataFrame = pd.DataFrame(),
-        column_groups: dict[str, tuple[list[str], list[str]]] = {},
-        other_lists: dict[str, pd.DataFrame] = {},
-    ) -> "TargetList":
-        first = first if first else TargetList()
-        answer = first.copy()
-        if answer.target_list.empty or answer.target_list is None:
-            answer.target_list = target_list
-        else:
-            answer.target_list = answer.target_list.join(target_list)
-        for name, (primary, secondary) in column_groups.items():
-            if entry := answer.column_groups.get(name, None):
-                answer.column_groups[name] = (entry[0] + primary, entry[1] + secondary)
-            else:
-                answer.column_groups[name] = (primary, secondary)
-        for name, other_list in other_lists.items():
-            answer.other_lists[name] = other_list
         return answer
 
 
@@ -144,10 +124,10 @@ def verify_step_requirements(tl: TargetList, required_tables: set[str] = None, r
             raise ValueError(f"Required column(s) missing: {required_columns - existing_columns}")
 
 
-# following are methods to be used as steps of a TargetListCreator
+# following are methods are meant to be used as steps of a TargetListCreator
 
 
-def add_targets(tl: TargetList = TargetList(), **kwargs) -> TargetList:
+def add_targets(tl: TargetList = None, **kwargs) -> TargetList:
     """Add rows for each target in the database"""
     targets = pd.read_sql(
         "select * from targets;",
@@ -156,7 +136,8 @@ def add_targets(tl: TargetList = TargetList(), **kwargs) -> TargetList:
     convert_columns_to_human_style(targets)
     important_columns = ["Target Name", "RA", "Dec"]
     column_groups = {"Target": (important_columns, [column for column in targets.columns if not column in important_columns])}
-    return TargetList.merge(tl, targets, column_groups, {})
+    answer = TargetList(name=tl.name, target_list=targets, column_groups=column_groups)
+    return answer
 
 
 def concat_dataframe(tl: TargetList, other_df: pd.DataFrame, **kwargs) -> TargetList:
@@ -301,6 +282,7 @@ def add_observability(
     constraints: list[ap.Constraint] = None,
     column_prefix: str = "Observable ",
     calc_moon_distance: bool = False,
+    time_resolution = 15 * u.min,
     **kwargs,
 ) -> TargetList:
     lo_alt, hi_alt = observability_threshold[0].to(u.deg).value, observability_threshold[1].to(u.deg).value
@@ -320,7 +302,7 @@ def add_observability(
     overall_min_hours_observable = np.array([24] * len(answer.target_list))
     overall_min_moon_dist = np.array([180.0] * len(answer.target_list))
     nightly_columns = []
-    time_resolution = 15 * u.min
+    new_cols = {}
     for beg, end in observing_session.observing_segments:
         time_grid = ap.utils.time_grid_from_range((beg, end), time_resolution=time_resolution)
         segment_alts = [observing_session.observer.altaz(time_grid, coord).alt.value for coord in coords]
@@ -331,7 +313,7 @@ def add_observability(
         segment_max_alts = [np.max(target_alts) for target_alts in segment_alts]
         segment_observability = list(map(lambda x: x > 0, segment_good_alts))
         column_name = f"{column_prefix}{beg.iso[:10]}"
-        answer.target_list[column_name] = segment_observability
+        new_cols[column_name] = segment_observability
         overall_any_night |= segment_observability
         overall_every_night &= segment_observability
         nightly_columns.append(column_name)
@@ -340,10 +322,10 @@ def add_observability(
             np.min([current_min_hours, this_min_hours])
             for current_min_hours, this_min_hours in zip(overall_min_hours_observable, segment_hours_observable)
         ]
-        answer.target_list[hours_observable_column] = segment_hours_observable
+        new_cols[hours_observable_column] = segment_hours_observable
         nightly_columns.append(hours_observable_column)
         max_alt_column = f"{column_name} Max Alt"
-        answer.target_list[max_alt_column] = segment_max_alts
+        new_cols[max_alt_column] = segment_max_alts
         nightly_columns.append(max_alt_column)
         overall_max_alts = [
             np.max([current_max_alt, this_alt]) for current_max_alt, this_alt in zip(overall_max_alts, segment_max_alts)
@@ -354,26 +336,27 @@ def add_observability(
             moon_dist_column = f"{column_name} Min Moon Dist"
             # NOTE: for some reason it has to be moon.separation(coords) not coords.separation(moon)!!!
             dist = moon.separation(coords).value
-            answer.target_list[moon_dist_column] = dist
+            new_cols[moon_dist_column] = dist
             nightly_columns.append(moon_dist_column)
             overall_min_moon_dist = [
                 np.min([current_min_dist, this_dist]) for current_min_dist, this_dist in zip(overall_min_moon_dist, dist)
             ]
     any_night_column = f"{column_prefix}Any Night"
-    answer.target_list[any_night_column] = overall_any_night
+    new_cols[any_night_column] = overall_any_night
     every_night_column = f"{column_prefix}Every Night"
-    answer.target_list[every_night_column] = overall_every_night
+    new_cols[every_night_column] = overall_every_night
     main_columns = [any_night_column, every_night_column]
     max_alt_column = f"{column_prefix}Max Alt"
-    answer.target_list[max_alt_column] = overall_max_alts
+    new_cols[max_alt_column] = overall_max_alts
     main_columns.append(max_alt_column)
     min_hours_observable_column = f"{column_prefix}Hours Min"
-    answer.target_list[min_hours_observable_column] = overall_min_hours_observable
+    new_cols[min_hours_observable_column] = overall_min_hours_observable
     main_columns.append(min_hours_observable_column)
     if calc_moon_distance:
         moon_dist_column = f"{column_prefix}Min Moon Dist"
-        answer.target_list[moon_dist_column] = overall_min_moon_dist
+        new_cols[moon_dist_column] = overall_min_moon_dist
         main_columns.append(moon_dist_column)
+    answer.target_list = answer.target_list.assign(**new_cols)
     answer.column_groups[column_prefix.strip()] = (main_columns, nightly_columns)
     moon_phases = pd.DataFrame()
     moon_phases["Time"] = [beg.iso[:10] for beg, _ in observing_session.observing_segments]
