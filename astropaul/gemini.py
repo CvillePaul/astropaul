@@ -1,8 +1,12 @@
 import astropy.units as u
 import pandas as pd
 
-def add_gemini_speckle_params(df: pd.DataFrame, **kwargs) -> pd.DataFrame:
+from astropaul.targetlistcreator import TargetList
+
+def add_gemini_speckle_params(tl: TargetList, **kwargs) -> TargetList:
     # For more info, see https://www.gemini.edu/instrumentation/alopeke-zorro/proposal-preparation
+    answer = tl.copy()
+    df = answer.target_list
     iq70_exposures, iq85_exposures = [], []
     for vmag in df["Vmag"].values:
         if vmag < 9:
@@ -36,4 +40,4 @@ def add_gemini_speckle_params(df: pd.DataFrame, **kwargs) -> pd.DataFrame:
     total_overhead = calibaration_overhead * photometric_overhead
     df["gemini_iq70_speckle_program_time"] = (df["gemini_iq70_speckle_exposure"] + pointing_time)* total_overhead
     df["gemini_iq85_speckle_program_time"] = (df["gemini_iq85_speckle_exposure"] + pointing_time)* total_overhead
-    return df
+    return answer
