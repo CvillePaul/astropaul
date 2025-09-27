@@ -42,24 +42,6 @@ def add_pepsi_params(
     return answer
 
 
-def add_rv_calibration_targets(tl: tlc.TargetList, **kwargs) -> tlc.TargetList:
-    answer = tl.copy()
-    conn = kwargs["connection"]
-    rv_calibrators = pd.read_sql("select * from rv_calibration_targets;", conn)
-    #     """
-    #     select t.target_name, t.ra, t.dec, t.ra_hms, t.dec_dms, t.target_type, t.source, rct.vmag, rct.teff
-    #     from targets t
-    #     join rv_calibration_targets rct on rct.target_name = t.target_name;""",
-    #     conn,
-    # )
-    tlc.convert_columns_to_human_style(rv_calibrators)
-    answer.target_list = pd.concat([
-        answer.target_list, 
-        rv_calibrators[["Target Name", "RA", "Dec", "RA HMS", "Dec DMS", "Target Type", "Vmag", "Teff", "PM RA", "PM Dec"]],
-        ])
-    return answer
-
-
 def assign_rv_standards(tl: tlc.TargetList, target_types: set[str], **kwargs) -> pd.DataFrame:
     def find_standard(value: float, standards: pd.DataFrame) -> int:
         closest_idx = (standards["Teff"] - value).abs().idxmin()
