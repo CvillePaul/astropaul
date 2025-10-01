@@ -20,12 +20,46 @@ import astropaul.phase as ph
 import __main__
 
 
+class TargetListCriterion:
+    def __init__(self, criterion: str, children: list["TargetListCriterion"] = None):
+        self.criterion = criterion
+        self.children = children or []
+
+    def copy(self) -> "TargetListCriterion":
+        answer = TargetListCriterion(criterion=self.criterion, children=self.children.copy())
+        return answer
+
+    def __repr__(self) -> str:
+        answer = self.criterion
+        for child in self.children:
+            for line in str(child).split("\n"):
+                answer += f"\n  {line}"
+        return answer
+
+
+class TargetListCriteria:
+    def __init__(self, criteria: list[TargetListCriterion] = None):
+        self.criteria = criteria or []
+
+    def copy(self) -> "TargetListCriteria":
+        answer = [criterion.copy() for criterion in self.criteria]
+        return answer
+
+    def __repr__(self) -> str:
+        answer = ""
+        for criterion in self.criteria:
+            answer += f"{criterion}\n"
+        return answer
+
+    def __len__(self) -> int:
+        return len(self.criteria)
+
 class TargetList:
     def __init__(
         self,
         name: str = "Target List",
         target_list: pd.DataFrame = None,
-        list_criteria: list[str] = None,
+        list_criteria: list[TargetListCriterion] = None,
         column_groups: dict[str, tuple[list[str], list[str]]] = None,
         other_lists: dict[str, pd.DataFrame] = None,
     ):
@@ -56,10 +90,10 @@ class TargetList:
 
     def summarize(self) -> str:
         answer = f"Name: {self.name}\n"
-        answer += "Criteria\n"
+        answer += "Criteria:\n"
         if len(self.list_criteria) > 0:
-            for criterion in self.list_criteria:
-                answer += f"    {criterion}\n"
+            for criterion in self.list_criteria.criteria:
+                answer += f"{criterion}\n"
         else:
             answer += "    (none)\n"
         target_types = collections.Counter(self.target_list["Target Type"])
@@ -74,6 +108,24 @@ class TargetList:
             answer += f"    {len(other):4d} rows, {len(other.columns):2d} columns: {name}\n"
         return answer
 
+    @staticmethod
+    def union(tls: list["TargetList"], name: str="Merged Target List") -> "TargetList":
+        if not tls or len(tls) == 0:
+            raise ValueError("Must supply at least one TargetList")
+        answer = tls[0].copy()
+        answer.name = name
+        for tl in tls[1:]:
+            answer.target_list = pd.concat([answer.target_list, tl.target_list], ignore_index=True)
+            answer.column_groups |= tl.column_groups
+            for table_name, table in tl.other_lists.items():
+                if table_name in answer.other_lists:
+                    answer.other_lists[table_name] = pd.concat([answer.other_lists[table_name], table])
+                else:
+                    answer.other_lists[table_name] = table
+        answer.list_criteria = TargetListCriteria([
+            TargetListCriterion(f"Union of list {" and ".join([f"{tl.name}" for tl in tls])}:",
+            [TargetListCriterion(f"List {tl.name}:", tl.list_criteria) for tl in tls])])
+        return answer
 
 class TargetListCreator:
     def __init__(self, name: str = "Standard", connection: Connection = None, steps: list = None, **kwargs):
@@ -259,7 +311,7 @@ def add_columns_from_sql(tl: TargetList, table_name: str, primary_cols: list[str
     if not other_table.empty:
         convert_columns_to_human_style(other_table)
         if not "Target Name" in other_table.columns:
-            raise ValueError(f"Table {table_name} must have a column named Target Name") 
+            raise ValueError(f"Table {table_name} must have a column named Target Name")
         secondary_cols = [col for col in other_table.columns if col not in primary_cols + ["Target Name"]]
         answer.target_list = answer.target_list.merge(other_table, on="Target Name", how="left")
         answer.column_groups[db_style_to_string(table_name)] = (primary_cols, secondary_cols)
@@ -282,7 +334,7 @@ def add_observability(
     constraints: list[ap.Constraint] = None,
     column_prefix: str = "Observable ",
     calc_moon_distance: bool = False,
-    time_resolution = 15 * u.min,
+    time_resolution=15 * u.min,
     **kwargs,
 ) -> TargetList:
     lo_alt, hi_alt = observability_threshold[0].to(u.deg).value, observability_threshold[1].to(u.deg).value
@@ -294,6 +346,8 @@ def add_observability(
 
     # calculate observability for each time segment of the observing session
     answer = tl.copy()
+    location = observing_session.observer.name or observing_session.observer.location
+    answer.list_criteria.append(f"Observability calculated at {location}")
     for constraint in constraints:
         answer.list_criteria.append(f"{constraint.__class__.__name__}: {vars(constraint)}")
     overall_any_night = np.array([False] * len(answer.target_list))
