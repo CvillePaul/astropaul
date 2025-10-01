@@ -1,5 +1,4 @@
 import astropy.units as u
-import pandas as pd
 
 from astropaul.targetlistcreator import TargetList
 
@@ -35,9 +34,10 @@ def add_gemini_speckle_params(tl: TargetList, **kwargs) -> TargetList:
     df["gemini_iq70_speckle_exposure"] = df["gemini_iq70_speckle_sequences"] * speckle_sequence_duration
     df["gemini_iq85_speckle_exposure"] = df["gemini_iq85_speckle_sequences"] * speckle_sequence_duration
     pointing_time = 300 * u.s
-    calibaration_overhead = 1.167 # 10 minutes of calibration target per hour of science target
+    calibration_overhead = 1.167 # 10 minutes of calibration target per hour of science target
     photometric_overhead = 1.016 # 10 minutes of calibration per 10 hour observing session
-    total_overhead = calibaration_overhead * photometric_overhead
+    total_overhead = calibration_overhead * photometric_overhead
     df["gemini_iq70_speckle_program_time"] = (df["gemini_iq70_speckle_exposure"] + pointing_time)* total_overhead
     df["gemini_iq85_speckle_program_time"] = (df["gemini_iq85_speckle_exposure"] + pointing_time)* total_overhead
+    answer.target_list = df
     return answer
