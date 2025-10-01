@@ -150,7 +150,7 @@ def make_summary_page(tl: tlc.TargetList, pl: pr.PriorityList, other_files: dict
         # output information about the targets
         d += tags.h2(
             f"Target List ({len(tl.target_list)} targets)",
-            tags.a("View target table", href=f"{tl.name} Target List.html", id="targets"),
+            tags.a("View target table", href=f"{tl.name}.html", id="targets"),
         )
         target_types = collections.Counter(tl.target_list["Target Type"])
         t = tags.table(border=cell_border(), cellpadding=cell_padding())
@@ -165,8 +165,8 @@ def make_summary_page(tl: tlc.TargetList, pl: pr.PriorityList, other_files: dict
         if tl.list_criteria and len(tl.list_criteria) > 0:
             d += tags.h2("List Criteria")
             criteria = tags.ul()
-            for criterion in tl.list_criteria:
-                criteria += tags.li(tags.code(criterion))
+            for line in str(tl.list_criteria).split("\n"):
+                criteria += tags.li(tags.pre(line))
             d += criteria
 
         # output information about other files
@@ -251,7 +251,7 @@ def make_summary_page(tl: tlc.TargetList, pl: pr.PriorityList, other_files: dict
 def make_target_list(tl: tlc.TargetList, pl: pr.PriorityList, other_files: dict[str, str], dir: str = "html") -> None:
     tltl = tl.target_list.copy()
     tltl["Target Name"] = [f'<a href="targets/{target_name}.html">{target_name}</a>' for target_name in tltl["Target Name"]]
-    title = f"{tl.name} Target List"
+    title = tl.name
     with dominate.document(title=title) as d:
         d.head += tags.a("Summary Page", href="index.html", id="summary")
         d += tags.h1(title, style="text-align: center")
