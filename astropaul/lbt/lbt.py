@@ -1,3 +1,5 @@
+from astropy.coordinates import SkyCoord
+import astropy.units as u
 import pandas as pd
 
 import astropaul.observing as obs
@@ -42,22 +44,27 @@ def add_pepsi_params(
     return answer
 
 
-def assign_rv_standards(tl: tlc.TargetList, target_types: set[str], **kwargs) -> pd.DataFrame:
+def assign_rv_standards(tl: tlc.TargetList, target_types: set[str], drop_unused: bool = True, **kwargs) -> pd.DataFrame:
     def find_standard(value: float, standards: pd.DataFrame) -> int:
         closest_idx = (standards["Teff"] - value).abs().idxmin()
         if closest_idx == closest_idx:
             return standards.loc[closest_idx, "Target Name"]
         else:
             return ""
+
     answer = tl.copy()
     targets = answer.target_list
     rv_standards = targets[targets["Target Type"] == "RV Standard"]
 
-    answer.target_list["RV Standard"] = [
-        find_standard(teff, standards=rv_standards)
-        if target_name in target_types else ""
-        for target_name, teff in targets[["Target Type", "Teff"]].values
+    targets["RV Standard"] = [
+        find_standard(teff, standards=rv_standards) if target_type in target_types else ""
+        for target_type, teff in targets[["Target Type", "Teff"]].values
     ]
+    if drop_unused:
+        all_standards = set(rv_standards["Target Name"])
+        standards_to_drop = all_standards - set(targets["RV Standard"])
+        targets = targets[~targets["Target Name"].isin(standards_to_drop)]
+    answer.target_list = targets
     return answer
 
 
@@ -70,11 +77,12 @@ def make_lbt_readme_table(target_list: pd.DataFrame, beg_lst: float = 0) -> pd.D
             break
         i += 1
     targets = pd.concat([targets.iloc[i:], targets.iloc[:i]], ignore_index=True)
+    coords = SkyCoord(ra=targets["RA"], dec=targets["Dec"], unit=u.deg)
     # build up the output table
     readme = pd.DataFrame()
     readme["Target Name"] = targets["Target Name"]
-    readme["RA"] = targets["RA HMS"]
-    readme["Dec"] = targets["Dec DMS"]
+    readme["RA"] = coords.ra.to_string(unit=u.hour, sep=":", precision=2)
+    readme["Dec"] = coords.dec.to_string(unit=u.hour, sep=":", precision=2, alwayssign=True)
     readme["Vmag"] = targets["Vmag"]
     readme["Teff"] = [f"{val:.0f}" for val in targets["Teff"]]
     readme["Fiber"] = targets["PEPSI fiber"]
