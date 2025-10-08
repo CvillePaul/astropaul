@@ -23,7 +23,7 @@ import __main__
 class TargetListCriterion:
     def __init__(self, criterion: str, children: list["TargetListCriterion"] = None):
         self.criterion = criterion
-        self.children = children or []
+        self.children = children or list()
 
     def copy(self) -> "TargetListCriterion":
         answer = TargetListCriterion(criterion=self.criterion, children=self.children.copy())
@@ -31,9 +31,10 @@ class TargetListCriterion:
 
     def __repr__(self) -> str:
         answer = self.criterion
-        for child in self.children:
-            for line in str(child).split("\n"):
-                answer += f"\n  {line}"
+        if self.children and len(self.children) > 0:
+            for child in self.children:
+                for line in str(child).split("\n"):
+                    answer += f"\n  {line}"
         return answer
 
 
@@ -42,8 +43,16 @@ class TargetListCriteria:
         self.criteria = criteria or []
 
     def copy(self) -> "TargetListCriteria":
-        answer = [criterion.copy() for criterion in self.criteria]
+        answer = TargetListCriteria([criterion.copy() for criterion in self.criteria])
         return answer
+
+    def add(self, criterion) -> None:
+        if isinstance(criterion, str):
+            self.criteria.append(TargetListCriterion(criterion))
+        elif isinstance(criterion, TargetListCriterion):
+            self.criteria.append(criterion)
+        else:
+            raise ValueError("Bad type for criterion")
 
     def __repr__(self) -> str:
         answer = ""
@@ -54,18 +63,21 @@ class TargetListCriteria:
     def __len__(self) -> int:
         return len(self.criteria)
 
+    def __iter__(self):
+        return iter(self.criteria)
+
 class TargetList:
     def __init__(
         self,
         name: str = "Target List",
         target_list: pd.DataFrame = None,
-        list_criteria: list[TargetListCriterion] = None,
+        list_criteria: TargetListCriteria = None,
         column_groups: dict[str, tuple[list[str], list[str]]] = None,
         other_lists: dict[str, pd.DataFrame] = None,
     ):
         self.name = name
         self.target_list = target_list if target_list is not None else pd.DataFrame()
-        self.list_criteria = list_criteria or []
+        self.list_criteria = list_criteria or TargetListCriteria()
         self.column_groups = column_groups or collections.defaultdict(list)
         if not other_lists:
             self.other_lists = dict()
@@ -92,14 +104,14 @@ class TargetList:
         answer = f"Name: {self.name}\n"
         answer += "Criteria:\n"
         if len(self.list_criteria) > 0:
-            for criterion in self.list_criteria.criteria:
-                answer += f"{criterion}\n"
+            for line in str(self.list_criteria).split("\n"):
+                answer += f"  {line}\n"
         else:
             answer += "    (none)\n"
         target_types = collections.Counter(self.target_list["Target Type"])
         answer += f"{len(self.target_list)} targets:\n"
         for type, count in target_types.items():
-            answer += f"    {count:4d} {type}\n"
+            answer += f"  {count:4d} {type}\n"
         answer += "Column Count (primary, secondary):\n"
         for name, (primary, secondary) in self.column_groups.items():
             answer += f"    {name}: ({len(primary)}, {len(secondary)})\n"
@@ -109,7 +121,7 @@ class TargetList:
         return answer
 
     @staticmethod
-    def union(tls: list["TargetList"], name: str="Merged Target List") -> "TargetList":
+    def union(tls: list["TargetList"], name: str = "Merged Target List") -> "TargetList":
         if not tls or len(tls) == 0:
             raise ValueError("Must supply at least one TargetList")
         answer = tls[0].copy()
@@ -122,10 +134,16 @@ class TargetList:
                     answer.other_lists[table_name] = pd.concat([answer.other_lists[table_name], table])
                 else:
                     answer.other_lists[table_name] = table
-        answer.list_criteria = TargetListCriteria([
-            TargetListCriterion(f"Union of list {" and ".join([f"{tl.name}" for tl in tls])}:",
-            [TargetListCriterion(f"List {tl.name}:", tl.list_criteria) for tl in tls])])
+        answer.list_criteria = TargetListCriteria(
+            [
+                TargetListCriterion(
+                    f"Union of lists: {" and ".join([f"{tl.name}" for tl in tls])}:",
+                    TargetListCriteria([TargetListCriterion(f"List {tl.name}:", tl.list_criteria) for tl in tls]),
+                )
+            ]
+        )
         return answer
+
 
 class TargetListCreator:
     def __init__(self, name: str = "Standard", connection: Connection = None, steps: list = None, **kwargs):
@@ -134,16 +152,13 @@ class TargetListCreator:
         self.kwargs = kwargs.copy()
         self.steps = steps
 
-    def calculate(self, initial_list: TargetList = None, steps=None, verbose: bool = False, **kwargs) -> TargetList:
+    def calculate(
+        self, initial_list: TargetList = None, steps=None, name: str = None, verbose: bool = False, **kwargs
+    ) -> TargetList:
         """
         Create a new target list by running through self.steps and returning the result
         """
-        if not initial_list:
-            initial_list = TargetList(name=self.name)
-        else:
-            initial_list = initial_list.copy()
-            initial_list.name = self.name
-        intermediate_tl = initial_list if initial_list else TargetList(name=self.name)
+        intermediate_tl = initial_list.copy() if initial_list else TargetList(name=name or self.name)
         merged_kwargs = {"connection": self.connection, **self.kwargs, **kwargs}
         if steps is None:
             steps = self.steps
@@ -347,9 +362,9 @@ def add_observability(
     # calculate observability for each time segment of the observing session
     answer = tl.copy()
     location = observing_session.observer.name or observing_session.observer.location
-    answer.list_criteria.append(f"Observability calculated at {location}")
+    answer.list_criteria.add(f"Observability calculated at {location} in {time_resolution} intervals")
     for constraint in constraints:
-        answer.list_criteria.append(f"{constraint.__class__.__name__}: {vars(constraint)}")
+        answer.list_criteria.add(f"{constraint.__class__.__name__}: {vars(constraint)}")
     overall_any_night = np.array([False] * len(answer.target_list))
     overall_every_night = np.array([True] * len(answer.target_list))
     overall_max_alts = np.array([-90.0] * len(answer.target_list))
@@ -438,7 +453,7 @@ def filter_targets(
         answer.target_list = answer.target_list[~criteria(answer.target_list)]
     else:
         answer.target_list = answer.target_list[criteria(answer.target_list)]
-    answer.list_criteria.append(code)
+    answer.list_criteria.add(code)
     return answer
 
 
@@ -472,7 +487,7 @@ def filter_other_list(tl: TargetList, list_name: str, criteria, inverse: bool = 
         mask = ~mask
     surviving_targets = set(other_list[mask]["Target Name"])
     answer.target_list = answer.target_list[tl.target_list["Target Name"].isin(surviving_targets)]
-    answer.list_criteria.append(code)
+    answer.list_criteria.add(code)
     return answer
 
 
