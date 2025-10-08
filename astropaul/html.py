@@ -696,6 +696,7 @@ def html_to_pdf(input_html_path, output_pdf_path):
         )
         page.pdf(
             path=output_pdf_path,
+            scale=0.8,
             format="Letter",
             margin={"left": "0.4 in"},
             landscape=True,
