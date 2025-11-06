@@ -45,20 +45,27 @@ def add_pepsi_params(
 
 
 def assign_rv_standards(tl: tlc.TargetList, target_types: set[str], drop_unused: bool = True, **kwargs) -> pd.DataFrame:
-    def find_standard(value: float, standards: pd.DataFrame) -> int:
-        closest_idx = (standards["Teff"] - value).abs().idxmin()
+    def find_standard(target_coord: SkyCoord, teff: float, standards: pd.DataFrame, standards_coords: SkyCoord) -> int:
+        nearby_standards = standards[target_coord.separation(standards_coords) < 60 * u.deg]
+        print(len(nearby_standards))
+        closest_idx = (nearby_standards["Teff"] - teff).abs().idxmin()
         if closest_idx == closest_idx:
-            return standards.loc[closest_idx, "Target Name"]
+            return nearby_standards.loc[closest_idx, "Target Name"]
         else:
             return ""
 
     answer = tl.copy()
     targets = answer.target_list
     rv_standards = targets[targets["Target Type"] == "RV Standard"]
+    standards_coords = SkyCoord(ra=rv_standards["RA"], dec=rv_standards["Dec"], unit="deg")
 
     targets["RV Standard"] = [
-        find_standard(teff, standards=rv_standards) if target_type in target_types else ""
-        for target_type, teff in targets[["Target Type", "Teff"]].values
+        (
+            find_standard(SkyCoord(ra=ra, dec=dec, unit="deg"), teff, rv_standards, standards_coords)
+            if target_type in target_types
+            else ""
+        )
+        for target_type, ra, dec, teff in targets[["Target Type", "RA", "Dec", "Teff"]].values
     ]
     if drop_unused:
         all_standards = set(rv_standards["Target Name"])
