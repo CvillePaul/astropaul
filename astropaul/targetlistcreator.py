@@ -557,23 +557,24 @@ def add_system_configuration(
     # create a separate table of observations made during eclipse to add to answer if requested
     eclipse_observations = pd.DataFrame(columns=["Target Name", "Mid JD", "Mid UTC", "System", "Member", "Type"])
     # categorize all observation rows
-    system_eclipses, system_durations = {}, {}
+    system_eclipses, system_phases = {}, {}
     for system in systems:
         system_eclipses[system] = []
-        system_durations[system] = []
+        system_phases[system] = []
     for _, row in table.iterrows():
         target_name = row["Target Name"]
         observation_time = row[time_column]
         target_ephem = ephem[ephem["Target Name"] == target_name]
         for system in systems:
+            phases = ""
             system_ephem = target_ephem[target_ephem["System"] == system]
             if system_ephem.empty:  # this target doesn't have an ephem entry for this system
                 system_eclipses[system].append("")
-                system_durations[system].append(float("nan"))
                 continue
             eclipse_found = False
             for _, ephem_row in system_ephem.sort_values("Member").iterrows():
                 member_ephem = ph.Ephemeris.from_dataframe_row(ephem_row)
+                phases += f"{system}{ephem_row["Member"]}: {ph.calc_phase(member_ephem, observation_time):.2f} "
                 if member_ephem.duration != member_ephem.duration:
                     continue  # skip calculation for members with no duration specified
                 event_list = ph.PhaseEventList.calc_phase_events(
@@ -582,11 +583,11 @@ def add_system_configuration(
                 if len(event_list.events) < 2:
                     raise ValueError(f"Unexpected event list {event_list}")
                 if event_list.events[0].type == "Eclipse":
-                    system_eclipses[system].append(f"{system}{ephem_row["Member"]}")
                     duration_percent = 1 - ((event_list.events[1].time - observation_time) / member_ephem.duration).to(
                         u.dimensionless_unscaled
                     )
-                    system_durations[system].append(duration_percent)
+                    system_eclipses[system].append(f"{system}{ephem_row["Member"]}: {duration_percent:.2f}")
+
                     eclipse_found = True
                     eclipse_observations.loc[len(eclipse_observations)] = [
                         target_name,
@@ -599,10 +600,10 @@ def add_system_configuration(
                     break
             if not eclipse_found:
                 system_eclipses[system].append("")
-                system_durations[system].append(float("nan"))
+            system_phases[system].append(phases)
     for system in systems:
         table[f"System {system} Eclipse"] = system_eclipses[system]
-        table[f"System {system} Duration Percent"] = system_durations[system]
+        table[f"System {system} Phases"] = system_phases[system]
     answer.other_lists[table_name] = table
     if eclipse_table:
         answer.other_lists[eclipse_table] = eclipse_observations
