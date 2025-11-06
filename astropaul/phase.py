@@ -49,6 +49,10 @@ class PhaseEventDef:
     calculation: Callable[[str, Ephemeris, int], PhaseEvent]
 
 
+def calc_phase(ephemeris: Ephemeris, time: Time) -> float:
+    return ((time - ephemeris.t0).jd % ephemeris.period.to(u.day).value) / ephemeris.period.to(u.day).value
+
+
 def calc_time_of_phase(name: str, ephemeris: Ephemeris, orbit: int, phase: float) -> PhaseEvent:
     """Calculates events of a bound system that occur at a particular point in the phase of the system
 
@@ -187,7 +191,9 @@ class PhaseEventList:
             raise ValueError("Time segment not chronological")
         if not ephem or not event_defs:
             raise ValueError("No parameters can be None")
-        orbit = int((beg - ephem.t0) / ephem.period) - 1  # previous orbit (the -1) helps when window is short & event defs are few
+        orbit = (
+            int((beg - ephem.t0) / ephem.period) - 1
+        )  # previous orbit (the -1) helps when window is short & event defs are few
         prev_event = None
         i = 0
         events = []
