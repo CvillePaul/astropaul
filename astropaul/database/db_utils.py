@@ -5,6 +5,7 @@ from sqlite3 import Connection
 
 
 def database_path() -> Path:
+    #TODO: change to use a relative path for portability
     return Path("/Users/User/Dropbox/Astro/Data/astropaul.db")
 
 
@@ -17,3 +18,17 @@ def database_connection(path: str = None):
         yield conn
     finally:
         conn.close()
+
+
+def string_to_db_style(name: str) -> str:
+    """Converts a directory or CSV column name to its database equivalent"""
+    return name.lower().replace(" ", "_")
+
+
+def db_style_to_string(name: str) -> str:
+    """Converts a name in database style back to a more pretty, human form"""
+    answer = name.replace("_", " ")
+    answer = answer.title()
+    for string in ["Jd", "Utc", "Id", "Dssi", "Ra", "Hms", "Dms", "Pepsi", "Rv", "Pm"]:
+        answer = answer.replace(string, string.upper())
+    return answer
