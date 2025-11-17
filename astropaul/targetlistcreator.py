@@ -66,6 +66,7 @@ class TargetListCriteria:
     def __iter__(self):
         return iter(self.criteria)
 
+
 class TargetList:
     def __init__(
         self,
@@ -520,6 +521,49 @@ def add_dssi_phase(tl: TargetList, phase_event_defs: list[ph.PhaseEventDef], **k
     return answer
 
 
+def add_member_phases(
+    tl: TargetList,
+    table_name: str,
+    time_column: str,
+    synthetic_phase_percent: float = float("nan"),
+    **kwargs,
+) -> TargetList:
+    """For the specified table, add a column indicating the phases of each member of the target.
+    For these calculations, the specified column contains astropy Time objects to use.
+    A phase of 0.0 is mid eclipse of the a member.
+    If `synthetic_phase_percent` is provided it will be used on systems lacking an eclipse duration."""
+    verify_step_requirements(tl, {table_name})
+    table = tl.other_lists[table_name]
+    for col in ["Target Name", time_column]:
+        if not col in table.columns:
+            raise ValueError(f"Table {table_name} does not have a column {time_column}")
+    answer = tl.copy()
+    all_targets = set(table["Target Name"].unique())
+    ephem = tl.other_lists["Ephemerides"]
+    ephem = ephem[ephem["Target Name"].isin(all_targets)]
+    ephem = ephem.sort_values(["Target Name", "System", "Member"])
+    target_ephems = collections.defaultdict(list)
+    for _, row in ephem.iterrows():
+        target_name = row["Target Name"]
+        target_ephems[target_name].append(ph.Ephemeris.from_dataframe_row(row))
+
+    phases = []
+    for _, row in table.iterrows():
+        target_name = row["Target Name"]
+        observation_time = row[time_column]
+        phases.append(
+            " ".join(
+                [
+                    f"{target_ephem.system}{target_ephem.component}: {ph.calc_phase(target_ephem, observation_time):.2f}"
+                    for target_ephem in target_ephems[target_name]
+                ]
+            )
+        )
+    table["Member Phases"] = phases
+    answer.other_lists[table_name] = table
+    return answer
+
+
 def add_system_configuration(
     tl: TargetList,
     table_name: str,
@@ -534,7 +578,7 @@ def add_system_configuration(
     For a system not in eclipse, show the percent of phase, where 0.0 is mid eclipse of the a member.
     If `synthetic_phase_percent` is provided it will be used on systems lacking an eclipse duration.
     If `eclipse_table` is specified, add a table of all observations occurring during eclipse."""
-    verify_step_requirements(tl, {table_name})
+    verify_step_requirements(tl, {table_name, "Ephemerides"})
     table = tl.other_lists[table_name]
     for col in ["Target Name", time_column]:
         if not col in table.columns:
@@ -601,9 +645,9 @@ def add_system_configuration(
             if not eclipse_found:
                 system_eclipses[system].append("")
             system_phases[system].append(phases)
-    for system in systems:
-        table[f"System {system} Eclipse"] = system_eclipses[system]
-        table[f"System {system} Phases"] = system_phases[system]
+        for system in systems:
+            table[f"System {system} Eclipse"] = system_eclipses[system]
+            table[f"System {system} Phases"] = system_phases[system]
     answer.other_lists[table_name] = table
     if eclipse_table:
         answer.other_lists[eclipse_table] = eclipse_observations
