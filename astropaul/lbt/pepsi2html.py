@@ -1,13 +1,17 @@
 import argparse
-from glob import glob
 from datetime import datetime, timedelta
+from glob import glob
 import os
+from pathlib import Path
+
 from astropy.io import fits
-from bokeh.io import output_file
 from bokeh.layouts import column
+from bokeh.io.export import export_png
 from bokeh.plotting import figure, output_file, save
 from bokeh.models.tools import BoxZoomTool, PanTool, ResetTool
+import matplotlib.pyplot as plt
 import numpy as np
+import pandas as pd
 
 spectrum_extensions = [".nor", ".bwl"]
 
@@ -36,8 +40,8 @@ def pepsi2html(spectrum_dirs: list[str], out_dir: str = ".", verbose: bool = Fal
                     exposure = timedelta(hours=dt.hour, minutes=dt.minute, seconds=dt.second).total_seconds()
                 if (snr := header.get("SNR")) is None:
                     snr = 0
-
                 data = hdul[1].data
+                spectrum = pd.DataFrame({"Wavelength": data["Arg"], "Flux": np.clip(data["Fun"], a_min=None, a_max=1.3)})
                 title = (
                     f"{target:<23s}: {arm:>4s} arm, CD{cd:<14s}, {exposure:>4.0f}sec, SNR {snr:5d}, {obstime[:19]}  File: {filename:<30s}"
                 )
@@ -46,8 +50,19 @@ def pepsi2html(spectrum_dirs: list[str], out_dir: str = ".", verbose: bool = Fal
                     sizing_mode="stretch_width",
                     tools=[BoxZoomTool(), PanTool(), ResetTool()],
                 )
-                p.line(data["Arg"], np.clip(data["Fun"], a_min=None, a_max=1.3), line_width=0.2)
+                p.line(spectrum["Wavelength"], spectrum["Flux"], line_width=0.2)
                 p.xaxis.ticker.num_minor_ticks = 25
+                img_file = Path(out_dir) / f"{target} {arm} {obstime.replace(":", "-")}.png"
+                _, ax = plt.subplots(figsize=(15, 10))
+                ax.plot(spectrum["Wavelength"], spectrum["Flux"], linewidth=0.1)
+                if arm == "Blue":
+                    ax.set_xlim([4700, 5500])
+                elif arm == "Red":
+                    ax.set_xlim([7300, 9100])
+                ax.set_ylim([0.3, 1.3])
+                ax.set_title(title)
+                plt.savefig(img_file, dpi=150, bbox_inches="tight", pad_inches=0.1)
+                plt.close()
                 plots.append(p)
                 # if verbose:
                 #     print(title)
