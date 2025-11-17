@@ -1,6 +1,9 @@
-from astropy.coordinates import SkyCoord
+from astropy.coordinates import SkyCoord, EarthLocation
+from astropy.io import fits
+from astropy.time import Time
 import astropy.units as u
 import pandas as pd
+from specutils import Spectrum
 
 import astropaul.observing as obs
 import astropaul.targetlistcreator as tlc
@@ -125,3 +128,26 @@ def write_lbt_readme_file(file_base: str, targets: pd.DataFrame, session: obs.Ob
     with open(file_base + ".README", "w") as f:
         f.write(output)
     return output
+
+
+def read_pepsi_file(filename: str) -> Spectrum:
+    hdul = fits.open(filename)
+    header = hdul[0].header
+    target_name = header["OBJECT"]
+    location = EarthLocation(lat=header["LATITUDE"], lon=header["LONGITUD"], height=header["ALTITUDE"])
+    obs_time = Time(f"{header["DATE-OBS"]} {header["TIME-OBS"]}", format="iso")
+    coord = SkyCoord(ra=header["RA2000"], dec=header["DE2000"], unit=(u.hourangle, u.deg), frame="icrs")
+    # barycentric_rv = coord.radial_velocity_correction(kind="barycentric", obstime=obs_time, location=location)
+    barycentric_rv = header["SSBVEL"] * u.m / u.s
+    data = hdul[1].data
+    wavelength, flux = data["Arg"] * u.AA, data["Fun"] * u.dimensionless_unscaled
+    meta = {key: val for key, val in header.items()} # dict doesn't restrict key length & can have any value type, unlike Header
+    spectrum = Spectrum(spectral_axis=wavelength, flux=flux - 1, meta=meta)
+    spectrum.shift_spectrum_to(radial_velocity=barycentric_rv)
+    spectrum.meta["Target Name"] = target_name
+    spectrum.meta["Location"] = location
+    spectrum.meta["Observation Time"] = obs_time
+    spectrum.meta["Coord"] = coord
+    spectrum.meta["Barycenter RV"] = barycentric_rv
+    spectrum.meta["Filename"] = filename
+    return spectrum
