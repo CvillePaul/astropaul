@@ -5,14 +5,14 @@ import networkx as nx
 import pandas as pd
 import sqlalchemy as sa
 
-from .DataTransformation import *
 from .db_utils import *
-from .TableConfig import *
+from .table_config import *
+from .data_transformations import *
 
 def create_table(metadata: sa.MetaData, table_config: TableConfig, table_metadata: pd.DataFrame) -> int:
     table_columns = []
-    if table_config.has_id_column:
-        table_columns.append(sa.Column("id", sa.Integer, primary_key=True, autoincrement=True))
+    primary_key_type = table_config.key_generator.get_key_type()
+    table_columns.append(sa.Column("id", primary_key_type, primary_key=True))
     for transformation in table_config.transformations:
         for sql_name, sql_type in transformation.get_sql_columns():
             table_columns.append(sa.Column(sql_name, sql_type))
@@ -55,6 +55,7 @@ def insert_csv_data(
             validation_values[child_column] = set([row[0] for row in result])
     # validate and insert rows from each data file
     num_rows = 0
+    num_constraint_violations = None
     for file_name, df_from_csv in data_files:
         # verify constrained columns have allowed values
         for child_column in table_config.constraints.keys():
@@ -65,6 +66,9 @@ def insert_csv_data(
                     constraint_violations.append(value)
             if len(constraint_violations) == 0:
                 continue
+            if not num_constraint_violations:
+                num_constraint_violations = 0
+            num_constraint_violations += len(constraint_violations)
             message = f"In file {file_name}, column {child_column} contains invalid values {constraint_violations}"
             if "log" in table_config.constraint_options:
                 print(message)
@@ -73,13 +77,16 @@ def insert_csv_data(
                 df_from_csv = df_from_csv[~violation_mask]
             else:
                 raise ValueError(message)
+        if df_from_csv.empty:
+            continue
         # now build the DataFrame we'll convert to sql
         df_for_sql = pd.DataFrame()
+        df_for_sql["id"] = table_config.key_generator.generate_primary_keys(df_from_csv)
         for transformation in table_config.transformations:
             df_for_sql = transformation.do_transformation(df_from_csv, df_for_sql)
         df_for_sql.to_sql(table_config.table_name, engine, if_exists="append", index=False)
         num_rows += len(df_from_csv)
-    return num_rows
+    return num_rows, num_constraint_violations
 
 
 def get_data_files(data_dir: Path) -> list[tuple[str, pd.DataFrame]]:
@@ -134,11 +141,15 @@ def csv2sql(base_dir: str, outfile: str=None, verbose: bool=False):
         for table_name in table_order:
             table_config = table_configs[table_name]
             if verbose:
-                print(f"Table {table_config.table_name}: ", end="")
+                print(f"Table {db_style_to_string(table_name)}: ", end="")
             data_files = data_files_by_table[table_name]
-            num_rows = insert_csv_data(engine, metadata, data_files, table_config)
+            num_rows, num_violations = insert_csv_data(engine, metadata, data_files, table_config)
             if verbose:
-                print(f"{num_rows} rows inserted from {len(data_files)} files")
+                if num_violations:
+                    voilation_text = f", {num_violations} rows skipped"
+                else:
+                    voilation_text = ""
+                print(f"{num_rows} rows inserted from {len(data_files)} files{voilation_text}")
 
         if verbose:
             print(f"Database {outfile_path} created")
