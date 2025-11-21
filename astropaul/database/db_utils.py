@@ -4,9 +4,17 @@ from pathlib import Path
 from sqlite3 import Connection
 
 
+def base_path() -> Path:
+    # TODO: change to use a relative path for portability
+    return Path("/Users/User/Dropbox/Astro/")
+
+
 def database_path() -> Path:
-    #TODO: change to use a relative path for portability
-    return Path("/Users/User/Dropbox/Astro/Data/astropaul.db")
+    return base_path() / "Data/astropaul.db"
+
+
+def resources_path() -> Path:
+    return base_path() / "Resources/"
 
 
 @contextmanager
