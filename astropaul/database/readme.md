@@ -2,24 +2,27 @@
 
 ```
 [metadata]
-Table Type = [Observations|]
+Table Type = Observations
 Observation Type = [Spectroscopy|Speckle]
 Instrument = [PEPSI|ZorroAlopeke|DSSI]
 Analysis Type = [Speckle Detection|Data Assessment]
 
 [transformations]
-CoordinateDataTransformation = {ra_column}, {dec_column}
-InferredTypeTransformation = {column_name}
+CoordinateDataTransformation = {ra column}, {dec column}
+InferredTypeTransformation = {column name}
 
 [options]
-constraint policy = [log][skip]
+Primary Key = {key generator class}|[class options]
+    SequentialIntKeyGenerator
+    ColumnBasedKeyGenerator|Column 1,Column 2[:4],Column 3[6:8]
+Constraint Policy = [log][skip]
 
 [columns]
-{column_name} = str
+{column name} = str
 
 [constraints]
-{column_name} = {foreign_table}.{foreign_column}
+{column name} = {foreign table}.{foreign column}
 
 [units]
-{column_name} = {Astropy unit string}
+{column name} = {Astropy unit string}
 ```
