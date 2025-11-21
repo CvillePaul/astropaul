@@ -6,6 +6,7 @@ Table Type = Observations
 Observation Type = [Spectroscopy|Speckle]
 Instrument = [PEPSI|ZorroAlopeke|DSSI]
 Analysis Type = [Speckle Detection|Data Assessment]
+Associated Table = {table name}
 
 [transformations]
 CoordinateDataTransformation = {ra column}, {dec column}

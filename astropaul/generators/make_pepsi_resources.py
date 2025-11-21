@@ -28,6 +28,7 @@ def make_pepsi_resources(fits_dir: Path, resources_dir: Path):
 
     with database_connection() as conn:
         observations = pd.read_sql("select * from pepsi_observations;", conn)
+        cursor = conn.cursor()
 
         spectrum_resources = pd.DataFrame()
         spectrum_resources["id"] = observations["id"]
@@ -39,7 +40,16 @@ def make_pepsi_resources(fits_dir: Path, resources_dir: Path):
             spectrum.write(resources_dir / file, format="tabular-fits", overwrite=True)
             for spectrum, file in zip(spectra, spectrum_resources[spectrum_sql_name])
         ]
-        spectrum_resources.to_sql(f"resource_{spectrum_sql_name}", conn, if_exists="replace", index=False)
+        spectrum_table_name = f"resource_{spectrum_sql_name}"
+        spectrum_resources.to_sql(spectrum_table_name, conn, if_exists="replace", index=False)
+        cursor.execute(f"delete from table_metadata where table_name = '{spectrum_table_name}';")
+        cursor.execute(
+            f"""
+            insert into table_metadata 
+            (table_name, column_name, value_type, value) 
+            values ('{spectrum_table_name}', NULL, 'Associated Table', 'PEPSI Observations')
+            ;"""
+        )
         print(f"Created {len(spectrum_resources)} {spectrum_resource_name} objects")
 
         spectrumplot_resources = pd.DataFrame()
@@ -52,5 +62,16 @@ def make_pepsi_resources(fits_dir: Path, resources_dir: Path):
             ax.set_ylim(-1, 0.5)
             fig.savefig(resources_dir / file)
             plt.close()
-        spectrumplot_resources.to_sql(f"resource_{spectrumplot_sql_name}", conn, if_exists="replace", index=False)
+        spectrumplot_table_name = f"resource_{spectrumplot_sql_name}"
+        spectrumplot_resources.to_sql(spectrumplot_table_name, conn, if_exists="replace", index=False)
+        cursor.execute(f"delete from table_metadata where table_name = '{spectrumplot_table_name}';")
+        cursor.execute(
+            f"""
+            insert into table_metadata 
+            (table_name, column_name, value_type, value) 
+            values ('{spectrumplot_table_name}', NULL, 'Associated Table', 'PEPSI Observations')
+            ;"""
+        )
         print(f"Created {len(spectrumplot_resources)} {spectrumplot_resource_name} objects")
+
+        conn.commit()
