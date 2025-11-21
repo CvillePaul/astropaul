@@ -1,7 +1,11 @@
+from pathlib import Path
+
 from astropy.coordinates import SkyCoord, EarthLocation
 from astropy.io import fits
 from astropy.time import Time
 import astropy.units as u
+import matplotlib.pyplot as plt
+from matplotlib.ticker import MaxNLocator, AutoLocator, AutoMinorLocator
 import pandas as pd
 from specutils import Spectrum
 
@@ -137,12 +141,11 @@ def read_pepsi_file(filename: str) -> Spectrum:
     location = EarthLocation(lat=header["LATITUDE"], lon=header["LONGITUD"], height=header["ALTITUDE"])
     obs_time = Time(f"{header["DATE-OBS"]} {header["TIME-OBS"]}", format="iso")
     coord = SkyCoord(ra=header["RA2000"], dec=header["DE2000"], unit=(u.hourangle, u.deg), frame="icrs")
-    # barycentric_rv = coord.radial_velocity_correction(kind="barycentric", obstime=obs_time, location=location)
-    barycentric_rv = header["SSBVEL"] * u.m / u.s
+    barycentric_rv = coord.radial_velocity_correction(kind="barycentric", obstime=obs_time, location=location)
+    # barycentric_rv = header["SSBVEL"] * u.m / u.s
     data = hdul[1].data
     wavelength, flux = data["Arg"] * u.AA, data["Fun"] * u.dimensionless_unscaled
-    meta = {key: val for key, val in header.items()} # dict doesn't restrict key length & can have any value type, unlike Header
-    spectrum = Spectrum(spectral_axis=wavelength, flux=flux - 1, meta=meta)
+    spectrum = Spectrum(spectral_axis=wavelength, flux=flux - 1, meta={"header": header})
     spectrum.shift_spectrum_to(radial_velocity=barycentric_rv)
     spectrum.meta["Target Name"] = target_name
     spectrum.meta["Location"] = location
@@ -151,3 +154,17 @@ def read_pepsi_file(filename: str) -> Spectrum:
     spectrum.meta["Barycenter RV"] = barycentric_rv
     spectrum.meta["Filename"] = filename
     return spectrum
+
+def plot_pepsi_spectrum(spectrum: Spectrum):
+    fig, ax = plt.subplots(figsize=(10, 8))
+    ax.plot(spectrum.spectral_axis, spectrum.flux, linewidth=0.1)
+    ax.set_xlabel(r"Wavelength ($\AA$)")
+    ax.xaxis.set_major_locator(MaxNLocator(nbins=9, prune=None))
+    ax.xaxis.set_minor_locator(AutoMinorLocator(n=10))
+    ax.set_ylabel("Flux (au)")
+    ax.margins(y=0.15)
+    ax.grid(axis="x", color="0.70", which="major")
+    ax.grid(axis="x", color="0.95", which="minor")
+    filename = Path(spectrum.meta["Filename"]).name
+    ax.set_title(f"{spectrum.meta["Target Name"]}   {spectrum.meta["Observation Time"].iso[:19]}   {filename}")
+    return fig, ax
