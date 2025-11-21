@@ -142,7 +142,7 @@ def process_observation_lines(observation_lines: list[str], utc_date: datetime) 
                     dssi_sequences = pd.concat([
                         dssi_sequences, 
                         pd.DataFrame({
-                            "Target Name": [fields["target_name"].replace('"', "")],
+                            "Target Name": [fields["target_name"].replace('"', "").strip()],
                             "Wavelengths": [wavelengths],
                             "Image Number": [image_num],
                             "UTC DateTime": [datetime_utc],
