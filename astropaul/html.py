@@ -1,6 +1,6 @@
 import collections
 from datetime import datetime
-import pathlib
+from pathlib import Path
 import platform
 import shutil
 import textwrap
@@ -13,6 +13,7 @@ import dominate.util as util
 import itables
 import pandas as pd
 
+from astropaul.database import html_path, resources_path
 import astropaul.priority as pr
 import astropaul.targetlistcreator as tlc
 
@@ -90,6 +91,14 @@ def keybinding_script():
     return textwrap.dedent(
         """
         document.addEventListener("keydown", function(event) {
+            const el = event.target;
+            if (
+                el.tagName === 'INPUT' ||
+                el.tagName === 'TEXTAREA' ||
+                el.isContentEditable
+            ) {
+                return;  // Ignore keys typed into text fields or editable elements
+            }
             if (event.key === "ArrowRight") { document.getElementById("nextDay").click(); }
             if (event.key === "ArrowLeft")  { document.getElementById("prevDay").click(); }
             if (event.key === "s")          { document.getElementById("summary").click(); }
@@ -250,7 +259,9 @@ def make_summary_page(tl: tlc.TargetList, pl: pr.PriorityList, other_files: dict
 
 def make_target_list(tl: tlc.TargetList, pl: pr.PriorityList, other_files: dict[str, str], dir: str = "html") -> None:
     tltl = tl.target_list.copy()
-    tltl["Target Name"] = [f'<a href="targets/{target_name}.html">{target_name}</a>' for target_name in tltl["Target Name"]]
+    tltl["Target Name"] = [
+        f'<a href="../Targets/targets/{target_name}.html">{target_name}</a>' for target_name in tltl["Target Name"]
+    ]
     title = tl.name
     with dominate.document(title=title) as d:
         d.head += tags.a("Summary Page", href="index.html", id="summary")
@@ -441,7 +452,7 @@ def make_numerical_scores_pages(
                 }
                 with dominate.document(title=title) as d:
                     d += tags.h1(
-                        tags.a(target, href=f"../targets/{target}.html", id="targets"),
+                        tags.a(target, href=f"../../Targets/targets/{target}.html", id="targets"),
                         tags.span(style="display: inline-block; width: 10px;"),
                         f"Target Scores for {start_utc} UTC",
                         style="text-align: center",
@@ -566,7 +577,7 @@ def make_categorical_scores(tl: tlc.TargetList, pl: pr.PriorityList, other_files
 
 def make_target_pages(tl: tlc.TargetList, pl: pr.PriorityList, other_files: dict[str, str], dir: str = "html") -> None:
     # make pages for each individual target
-
+    Path(dir / "targets").mkdir(exist_ok=True)
     for _, row in tl.target_list.iterrows():
         target_name = row["Target Name"]
         with dominate.document(title=target_name) as d:
@@ -574,6 +585,7 @@ def make_target_pages(tl: tlc.TargetList, pl: pr.PriorityList, other_files: dict
             with tags.table(cellpadding=cell_padding()) as t:
                 tags.tr([tags.td("Target Type"), tags.td(row["Target Type"])])
                 tags.tr([tags.td("Target Source"), tags.td(row["Target Source"])])
+                # treat List Memberships specially - wrap contents as comma separated string instead of dataframe
                 list_memberships_name = "List Memberships"
                 if list_memberships_name in tl.other_lists.keys():
                     list_memberships = tl.other_lists[list_memberships_name]
@@ -590,13 +602,30 @@ def make_target_pages(tl: tlc.TargetList, pl: pr.PriorityList, other_files: dict
                 d += t
             other_tables = [
                 table_name
-                for table_name in tl.other_lists.keys()
-                if "Target Name" in list(tl.other_lists[table_name].columns) + [tl.other_lists[table_name].index.name]
-                and table_name != "List Memberships"  # skip this because it's handled above
+                for table_name, table in tl.other_lists.items()
+                if "Target Name" in list(table.columns) + [table.index.name]
+                and table_name != list_memberships_name  # skip this because it's handled above
+                and len(table[table["Target Name"] == target_name]) > 0 # skip empty tables
             ]
+            # link to plots of spectra if spectral observations are present
+            resources_dir = resources_path()
+            spectroscopy_observations = [("PEPSI Observations", "PEPSI SpectrumPlot")] # (table, plot column name)
+            for table_name, column_name in spectroscopy_observations:
+                if table_name in other_tables:
+                    spectra_dir = Path(dir) / "spectrum_plots"
+                    spectra_dir.mkdir(exist_ok=True)
+                    observations = tl.other_lists[table_name]
+                    if not "Plot" in observations.columns:
+                        for plot_resource in observations[column_name]:
+                            shutil.copy(resources_dir / plot_resource, spectra_dir)
+                        observations["Plot"] = [
+                            f'<a href="file:///C:{spectra_dir / Path(file).name}" target="_blank">Plot</a>'
+                            for file in observations[column_name]
+                        ]
+                        observations.drop(column_name, axis=1, inplace=True)
+            # add all the associated tables as grids
             for other_table in other_tables:
                 ot = tl.other_lists[other_table]
-                # ot = ot.sort_values(["Target Name"] + ot.columns[0:3].to_list())
                 if ot.index.name == "Target Name":
                     if target_name in ot.index:
                         entries = ot.loc[[target_name]].reset_index(drop=True)
@@ -634,10 +663,6 @@ def make_target_pages(tl: tlc.TargetList, pl: pr.PriorityList, other_files: dict
                 f.write(d.render())
 
 
-def output_directory() -> pathlib.Path:
-    return pathlib.Path("/Users/User/Dropbox/Astro/Observing Files")
-
-
 def clear_directory(dir: str) -> None:
     # wipe out contents of dir
     dir_cleared = False
@@ -651,21 +676,23 @@ def clear_directory(dir: str) -> None:
         except PermissionError as e:
             # try again many times if permission error while removing directory (due to Dropbox file sync lock issue)
             fail_count += 1
-            if fail_count > 50:
+            if fail_count >= 50:
                 raise PermissionError(f"Tried {fail_count} times", e)
 
 
-def render_observing_pages(tl: tlc.TargetList, pl: pr.PriorityList, other_files: dict[str, str], dir: str = "html") -> str:
+def render_observing_pages(tl: tlc.TargetList, pl: pr.PriorityList, other_files: dict[str, str], subdir: str = "html") -> str:
+    dir = html_path() / subdir
     clear_directory(dir)
-    pathlib.Path(f"{dir}/targets").mkdir(parents=True)
+    Path(dir).mkdir()
     if pl:
-        pathlib.Path(f"{dir}/target scores").mkdir(parents=True)
+        Path(dir / "target scores").mkdir(parents=True)
 
     make_summary_page(tl, pl, other_files, dir)
     make_target_list(tl, pl, other_files, dir)
     make_numerical_scores_pages(tl, pl, other_files, dir)
     make_categorical_scores(tl, pl, other_files, dir)
-    make_target_pages(tl, pl, other_files, dir)
+    if subdir == "targets":
+        make_target_pages(tl, pl, other_files, dir)
 
 
 from playwright.sync_api import sync_playwright
