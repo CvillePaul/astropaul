@@ -3,7 +3,7 @@ from pathlib import Path
 import matplotlib.pyplot as plt
 import pandas as pd
 
-from astropaul.database import database_connection
+from astropaul.database import database_connection, string_to_db_style
 import astropaul.lbt as lbt
 
 
@@ -15,13 +15,13 @@ def make_pepsi_resources(fits_dir: Path, resources_dir: Path):
     }
 
     spectrum_resource_name = "PEPSI Spectrum"
-    spectrum_sql_name = "pepsi_spectra"
+    spectrum_sql_name = string_to_db_style(spectrum_resource_name)
     spectrum_dir = Path(spectrum_resource_name)
     if not (resources_dir / spectrum_dir).exists():
         (resources_dir / spectrum_dir).mkdir()
 
     spectrumplot_resource_name = "PEPSI SpectrumPlot"
-    spectrumplot_sql_name = "pepsi_spectrumplots"
+    spectrumplot_sql_name = string_to_db_style(spectrumplot_resource_name)
     spectrumplot_dir = Path(spectrumplot_resource_name)
     if not (resources_dir / spectrumplot_dir).exists():
         (resources_dir / spectrumplot_dir).mkdir()
