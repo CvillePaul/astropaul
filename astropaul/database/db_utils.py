@@ -17,6 +17,10 @@ def resources_path() -> Path:
     return base_path() / "Resources/"
 
 
+def html_path() -> Path:
+    return base_path() / "Observing Files/"
+
+
 @contextmanager
 def database_connection(path: str = None):
     if not path:
@@ -39,4 +43,7 @@ def db_style_to_string(name: str) -> str:
     answer = answer.title()
     for string in ["Jd", "Utc", "Id", "Dssi", "Ra", "Hms", "Dms", "Pepsi", "Rv", "Pm"]:
         answer = answer.replace(string, string.upper())
+    special_cases = [("Zorroalopeke", "ZorroAlopeke"), ("Spectrumplot", "SpectrumPlot")]
+    for original, new in special_cases:
+        answer = answer.replace(original, new)
     return answer
