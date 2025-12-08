@@ -11,11 +11,8 @@ from .data_transformations import *
 
 def create_table(metadata: sa.MetaData, table_config: TableConfig, table_metadata: pd.DataFrame) -> int:
     table_columns = []
-    primary_key_type = table_config.key_generator.get_key_type()
-    table_columns.append(sa.Column("id", primary_key_type, primary_key=True))
     for transformation in table_config.transformations:
-        for sql_name, sql_type in transformation.get_sql_columns():
-            table_columns.append(sa.Column(sql_name, sql_type))
+        table_columns += transformation.get_sql_columns()
     sa.Table(table_config.table_name, metadata, *table_columns)
     # write info from ini file about units to the metadata table
     for column_name, unit in table_config.units.items():
@@ -81,7 +78,6 @@ def insert_csv_data(
             continue
         # now build the DataFrame we'll convert to sql
         df_for_sql = pd.DataFrame()
-        df_for_sql["id"] = table_config.key_generator.generate_primary_keys(df_from_csv)
         for transformation in table_config.transformations:
             df_for_sql = transformation.do_transformation(df_from_csv, df_for_sql)
         df_for_sql.to_sql(table_config.table_name, engine, if_exists="append", index=False)
