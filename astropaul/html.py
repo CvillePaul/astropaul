@@ -576,6 +576,71 @@ def make_categorical_scores(tl: tlc.TargetList, pl: pr.PriorityList, other_files
 
 
 def make_target_pages(tl: tlc.TargetList, pl: pr.PriorityList, other_files: dict[str, str], dir: str = "html") -> None:
+    columns_to_skip = {}
+    # do special things if certain resources are present
+    pepsi_table = "PEPSI Observations"
+    if pepsi_table in tl.other_lists:
+        pepsi_observations = tl.other_lists[pepsi_table]
+        columns_to_skip[pepsi_table] = ["PEPSI SpectrumPlot"]
+        spectra_dir = Path(dir) / "spectrum_plots"
+        spectra_dir.mkdir(exist_ok=True)
+        cd_stats = collections.defaultdict(set)
+        for (target_name, cd), rows in pepsi_observations.sort_values("Mid JD").groupby(["Target Name", "Cross Disperser"]):
+            name = f"{pepsi_table} for {target_name}"
+            with dominate.document(name=name) as d:
+                d.title = name
+                d.head += tags.link(rel="stylesheet", href="https://unpkg.com/flickity@2/dist/flickity.min.css")
+                # d.head += tags.link(rel="stylesheet", href="https://unpkg.com/flickity-fullscreen@2/fullscreen.css")
+                d.head += tags.script(src="https://unpkg.com/flickity@2/dist/flickity.pkgd.min.js")
+                # d.head += tags.script(src="https://unpkg.com/flickity-fullscreen@2/fullscreen.js")
+                carousel = tags.div(cls="carousel")
+                for _, row in rows.iterrows():
+                    cell = tags.div(cls="flikity-cell") 
+                    cell += tags.img(src=Path(row["PEPSI SpectrumPlot"]).name)
+                    carousel += cell
+                d += carousel
+                d += util.raw("</div>")
+                d += tags.style(".flickity-cell {width: 100%}")
+                d += tags.script("""
+                    var flkty = new Flickity('.carousel', {
+                        wrapAround: false,
+                        pageDots: false,
+                    });
+
+                    flkty.on( 'change', function( index ) {
+                        flkty.select(index, false, true);
+                    }); 
+                    flkty.focus();
+                    """)
+                with open(f"{spectra_dir}/{target_name} - CD{cd[0]}.html", "w") as f:
+                    f.write(d.render())
+            cd_stats[target_name].add(cd[0])
+
+    list_memberships_name = "List Memberships"
+    other_tables = {
+        table_name: table.copy()
+        for table_name, table in tl.other_lists.items()
+        if "Target Name" in list(table.columns) + [table.index.name]
+        and table_name != list_memberships_name  # skip this because it's handled elsewhere
+        # and len(table[table["Target Name"] == target_name]) > 0 # skip empty tables
+    }
+    # if spectral observations are present, add: links to plot in table, page w/ carousel of all plots
+    # TODO: this code permanently alters the observations table, it should instead modify a copy of it, leaving original intact
+    resources_dir = resources_path()
+    spectroscopy_observations = [("PEPSI Observations", "PEPSI SpectrumPlot")] # (table, plot column name)
+    for table_name, column_name in spectroscopy_observations:
+        if table_name in other_tables:
+            # add the link in the table
+            table = other_tables[table_name]
+            if not "Plot" in table.columns:
+                for plot_resource in table[column_name]:
+                    shutil.copy(resources_dir / plot_resource, spectra_dir)
+                table["Plot"] = [
+                    f'<a href="file:///C:{spectra_dir / Path(file).name}" target="_blank">Plot</a>'
+                    for file in table[column_name]
+                ]
+                # observations.drop(column_name, axis=1, inplace=True)                    
+
     # make pages for each individual target
     Path(dir / "targets").mkdir(exist_ok=True)
     for _, row in tl.target_list.iterrows():
@@ -586,7 +651,6 @@ def make_target_pages(tl: tlc.TargetList, pl: pr.PriorityList, other_files: dict
                 tags.tr([tags.td("Target Type"), tags.td(row["Target Type"])])
                 tags.tr([tags.td("Target Source"), tags.td(row["Target Source"])])
                 # treat List Memberships specially - wrap contents as comma separated string instead of dataframe
-                list_memberships_name = "List Memberships"
                 if list_memberships_name in tl.other_lists.keys():
                     list_memberships = tl.other_lists[list_memberships_name]
                     lists = list_memberships[list_memberships["Target Name"] == target_name]["List"].to_list()
@@ -600,42 +664,25 @@ def make_target_pages(tl: tlc.TargetList, pl: pr.PriorityList, other_files: dict
                 tags.tr([tags.th(item) for item in columns])
                 tags.tr([tags.td(value) for value in row[columns]])
                 d += t
-            other_tables = [
-                table_name
-                for table_name, table in tl.other_lists.items()
-                if "Target Name" in list(table.columns) + [table.index.name]
-                and table_name != list_memberships_name  # skip this because it's handled above
-                and len(table[table["Target Name"] == target_name]) > 0 # skip empty tables
-            ]
-            # link to plots of spectra if spectral observations are present
-            resources_dir = resources_path()
-            spectroscopy_observations = [("PEPSI Observations", "PEPSI SpectrumPlot")] # (table, plot column name)
-            for table_name, column_name in spectroscopy_observations:
-                if table_name in other_tables:
-                    spectra_dir = Path(dir) / "spectrum_plots"
-                    spectra_dir.mkdir(exist_ok=True)
-                    observations = tl.other_lists[table_name]
-                    if not "Plot" in observations.columns:
-                        for plot_resource in observations[column_name]:
-                            shutil.copy(resources_dir / plot_resource, spectra_dir)
-                        observations["Plot"] = [
-                            f'<a href="file:///C:{spectra_dir / Path(file).name}" target="_blank">Plot</a>'
-                            for file in observations[column_name]
-                        ]
-                        observations.drop(column_name, axis=1, inplace=True)
+
             # add all the associated tables as grids
-            for other_table in other_tables:
-                ot = tl.other_lists[other_table]
-                if ot.index.name == "Target Name":
+            for table_name, other_table in other_tables.items():
+                for column_name in columns_to_skip.get(table_name, []):
+                    other_table.drop(column_name, axis=1, inplace=True)
+                if other_table.index.name == "Target Name":
                     if target_name in ot.index:
-                        entries = ot.loc[[target_name]].reset_index(drop=True)
+                        entries = other_table.loc[[target_name]].reset_index(drop=True)
                     else:
                         entries = pd.DataFrame()
                 else:
-                    entries = ot[ot["Target Name"] == target_name].drop("Target Name", axis=1)
+                    entries = other_table[other_table["Target Name"] == target_name].drop("Target Name", axis=1)
                 entries = entries.reset_index(drop=True)
                 if not entries.empty:
-                    d += tags.h2(f"{other_table} ({len(entries)})")
+                    d += tags.h2(f"{table_name} ({len(entries)})")
+                    if table_name == pepsi_table and target_name in cd_stats:
+                        for cd in sorted(cd_stats[target_name]):
+                            d += tags.a(f"CD{cd} Plots",href=f"../{spectra_dir.name}/{target_name} - CD{cd}.html", target="_blank")
+                            d += tags.br()
                     table_options = {
                         "autowidth": False,
                         "float": "left",
@@ -649,7 +696,9 @@ def make_target_pages(tl: tlc.TargetList, pl: pr.PriorityList, other_files: dict
                             },
                         },
                     }
-                    d += util.raw(dataframe_to_datatable(entries, other_table, table_options))
+                    if "ID" in entries.columns:
+                        entries.drop("ID", axis=1, inplace=True)
+                    d += util.raw(dataframe_to_datatable(entries, table_name, table_options))
                 # else:
                 #     d += tags.span("(Empty Table)")
 
