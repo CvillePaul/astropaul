@@ -18,9 +18,6 @@ class TableConfig:
         self.constraint_options = set()
         self.units = {}  # key is column name, value is a valid astropy.units string
         self.metadata = None
-        key_generator_module_name = "astropaul.database.key_generators"
-        key_generator_module = importlib.import_module(key_generator_module_name)
-        key_generator_default = "SequentialIntKeyGenerator"
         specified_transformations = {}  # key is frozen set of input columns, value is transformation class
         if config_file.exists():
             config = configparser.ConfigParser()
@@ -30,22 +27,6 @@ class TableConfig:
             if specified_name := config.get("options", "Table Name", fallback=None):
                 self.table_name = string_to_db_style(specified_name)
             # TODO: change to get class name and options
-            key_generator_config = config.get("options", "Primary Key", fallback=key_generator_default)
-            if not (match := re.match(r"(?P<name>[A-Za-z0-9 ]+)(\|(?P<options>[^\|]+))?", key_generator_config)):
-                raise ValueError(f"Badly formatted Primary Key specification: {key_generator_config}")
-            key_generator_name = match.groupdict()["name"]
-            key_generator_options = match.groupdict().get("options", None)
-            key_generator_class = getattr(key_generator_module, key_generator_name, None)
-            if not (
-                key_generator_class
-                and inspect.isclass(key_generator_class)
-                and key_generator_class.__module__ == key_generator_module_name
-            ):
-                raise ValueError(f"Unknown key generator {key_generator_name}")
-            if key_generator_options:
-                self.key_generator = key_generator_class(key_generator_options)
-            else:
-                self.key_generator = key_generator_class()
             all_constraint_options = {"log", "skip"}
             constraint_policy = config.get("options", "Constraint Policy", fallback=None)
             if constraint_policy:
@@ -79,7 +60,9 @@ class TableConfig:
                         and transformation_class.__module__ == transformation_module_name
                     ):
                         raise ValueError(f"Unknown column transformer {transformation_name}")
-                    transformation_columns = tuple([column_name.lower().strip() for column_name in column_list.split(",")])
+                    transformation_columns = tuple(
+                        [string_to_db_style(column_name.lower().strip()) for column_name in column_list.split(",")]
+                    )
                     specified_transformations[transformation_columns] = transformation_class
                     unspecified_columns.difference_update(transformation_columns)
             # now handle config items dealing with data relations
@@ -94,8 +77,6 @@ class TableConfig:
                     foreign_table = string_to_db_style(parts[0])
                     foreign_column = string_to_db_style(parts[1])
                     self.constraints[column_name] = (foreign_table, foreign_column)
-        else:
-            self.key_generator = getattr(key_generator_module, key_generator_default, None)()
 
         processed_columns = set()
         for column_name in example_data.columns:
