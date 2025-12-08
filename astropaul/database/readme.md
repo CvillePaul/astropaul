@@ -2,7 +2,7 @@
 
 ```
 [metadata]
-Table Type = Observations
+Table Type = [Observations|Catalog Data]
 Observation Type = [Spectroscopy|Speckle]
 Instrument = [PEPSI|ZorroAlopeke|DSSI]
 Analysis Type = [Speckle Detection|Data Assessment]
@@ -11,6 +11,8 @@ Associated Table = {table name}
 [transformations]
 CoordinateDataTransformation = {ra column}, {dec column}
 InferredTypeTransformation = {column name}
+SingleColumnPrimaryKey = {column name}
+MultiColumnPrimaryKey = {column name 1, column name 2, ...}
 
 [options]
 Primary Key = {key generator class}|[class options]
