@@ -31,9 +31,9 @@ def make_pepsi_resources(fits_dir: Path, resources_dir: Path):
         cursor = conn.cursor()
 
         spectrum_resources = pd.DataFrame()
-        spectrum_resources["id"] = observations["id"]
+        spectrum_resources["ID"] = observations["ID"]
         spectrum_resources[spectrum_sql_name] = [
-            str(spectrum_dir / f"{spectrum_resource_name}.{id.replace(":", "_")}.spec") for id in observations["id"]
+            str(spectrum_dir / f"{spectrum_resource_name}.{id.replace(":", "_")}.spec") for id in observations["ID"]
         ]
         spectra = observations["spectrum_file"].apply(lambda file: lbt.read_pepsi_file(fits_files[file]))
         [
@@ -41,7 +41,7 @@ def make_pepsi_resources(fits_dir: Path, resources_dir: Path):
             for spectrum, file in zip(spectra, spectrum_resources[spectrum_sql_name])
         ]
         spectrum_table_name = f"resource_{spectrum_sql_name}"
-        spectrum_resources.to_sql(spectrum_table_name, conn, if_exists="replace", index=False)
+        spectrum_resources.to_csv(f"{spectrum_table_name}.csv", index=False)
         cursor.execute(f"delete from table_metadata where table_name = '{spectrum_table_name}';")
         cursor.execute(
             f"""
@@ -53,9 +53,9 @@ def make_pepsi_resources(fits_dir: Path, resources_dir: Path):
         print(f"Created {len(spectrum_resources)} {spectrum_resource_name} objects")
 
         spectrumplot_resources = pd.DataFrame()
-        spectrumplot_resources["id"] = observations["id"]
+        spectrumplot_resources["ID"] = observations["ID"]
         spectrumplot_resources[spectrumplot_sql_name] = [
-            str(spectrumplot_dir / f"{spectrumplot_resource_name}.{id.replace(":", "_")}.png") for id in observations["id"]
+            str(spectrumplot_dir / f"{spectrumplot_resource_name}.{id.replace(":", "_")}.png") for id in observations["ID"]
         ]
         for spectrum, file in zip(spectra, spectrumplot_resources[spectrumplot_sql_name]):
             fig, ax = lbt.plot_pepsi_spectrum(spectrum)
@@ -63,7 +63,7 @@ def make_pepsi_resources(fits_dir: Path, resources_dir: Path):
             fig.savefig(resources_dir / file)
             plt.close()
         spectrumplot_table_name = f"resource_{spectrumplot_sql_name}"
-        spectrumplot_resources.to_sql(spectrumplot_table_name, conn, if_exists="replace", index=False)
+        spectrumplot_resources.to_csv(f"{spectrumplot_table_name}.csv", index=False)
         cursor.execute(f"delete from table_metadata where table_name = '{spectrumplot_table_name}';")
         cursor.execute(
             f"""
