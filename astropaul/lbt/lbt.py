@@ -158,6 +158,10 @@ def read_pepsi_file(filename: str) -> Spectrum:
 def plot_pepsi_spectrum(spectrum: Spectrum):
     fig, ax = plt.subplots(figsize=(10, 8))
     ax.plot(spectrum.spectral_axis, spectrum.flux, linewidth=0.1)
+    cross_disperser = spectrum.meta["header"]["CROSDIS"]
+    xmin = int(cross_disperser[3:7])
+    xmax = int(cross_disperser[10:14])
+    ax.set_xlim(xmin, xmax)
     ax.set_xlabel(r"Wavelength ($\AA$)")
     ax.xaxis.set_major_locator(MaxNLocator(nbins=9, prune=None))
     ax.xaxis.set_minor_locator(AutoMinorLocator(n=10))
