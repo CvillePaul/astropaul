@@ -6,7 +6,6 @@ import shutil
 import textwrap
 
 import astropy.units as u
-from astropy.time import Time
 import dominate
 import dominate.tags as tags
 import dominate.util as util
@@ -260,7 +259,7 @@ def make_summary_page(tl: tlc.TargetList, pl: pr.PriorityList, other_files: dict
 def make_target_list(tl: tlc.TargetList, pl: pr.PriorityList, other_files: dict[str, str], dir: str = "html") -> None:
     tltl = tl.target_list.copy()
     tltl["Target Name"] = [
-        f'<a href="../Targets/targets/{target_name}.html">{target_name}</a>' for target_name in tltl["Target Name"]
+        f'<a href="../targets/targets/{target_name}.html">{target_name}</a>' for target_name in tltl["Target Name"]
     ]
     title = tl.name
     with dominate.document(title=title) as d:
@@ -340,7 +339,7 @@ def make_numerical_scores_pages(
                 styled_scores = []
                 for score, altitude in zip(pt[col], altitudes):
                     style = "text-align: center;"
-                    precision = 0 if score == 0 else 3
+                    precision = 0 if score == 0 else 2
                     if score > threshold:
                         style += above_threshold_style
                     if altitude == 0:
@@ -378,6 +377,7 @@ def make_numerical_scores_pages(
                 for target in pt["Target Name"]
             ]
             col_indexes_to_hide = [pt.columns.get_loc(col) for col in target_columns]
+            col_indexes_to_show = [i for i in range(len(pt.columns)) if i not in col_indexes_to_hide]
             buttons = [
                 {
                     "extend": "columnToggle",
@@ -391,7 +391,7 @@ def make_numerical_scores_pages(
             with dominate.document(title=title) as d:
                 d += tags.h1(title, style="text-align: center")
                 table_options = {
-                    "sort": False,
+                    "sort": True,
                     "layout": {
                         "topStart": {
                             "buttons": buttons,
@@ -408,7 +408,10 @@ def make_numerical_scores_pages(
                         },
                     },
                 }
-                column_defs = [{"targets": col_indexes_to_hide, "visible": False}]
+                column_defs = [
+                    {"targets": col_indexes_to_hide, "orderable": True, "visible": False},
+                    {"targets": col_indexes_to_show, "orderable": False, "visible": True},
+                    ]
                 d += util.raw(
                     dataframe_to_datatable(pt, "Numerical_Priority", table_options=table_options, column_defs=column_defs)
                 )
@@ -452,7 +455,7 @@ def make_numerical_scores_pages(
                 }
                 with dominate.document(title=title) as d:
                     d += tags.h1(
-                        tags.a(target, href=f"../../Targets/targets/{target}.html", id="targets"),
+                        tags.a(target, href=f"../../targets/targets/{target}.html", id="targets"),
                         tags.span(style="display: inline-block; width: 10px;"),
                         f"Target Scores for {start_utc} UTC",
                         style="text-align: center",
@@ -656,6 +659,15 @@ def make_target_pages(tl: tlc.TargetList, pl: pr.PriorityList, other_files: dict
                     lists = list_memberships[list_memberships["Target Name"] == target_name]["List"].to_list()
                     if lists:
                         tags.tr([tags.td(list_memberships_name), tags.td(", ".join([list[5:] for list in lists]))])
+                web_target_name = target_name.replace(" ", "+")
+                external_links = [
+                    ("SIMBAD", f"https://simbad.cds.unistra.fr/simbad/sim-id?Ident={web_target_name}"),
+                    ("ExoFOP", f"https://exofop.ipac.caltech.edu/tess/target.php?id={web_target_name}"),
+                    # ("Swarthmore Finder", f"https://astro.swarthmore.edu/transits/aladin.html?name={web_target_name}"),
+                ]
+                tags.tr([tags.td("External Links"), tags.td(tags.div(
+                    [[tags.a(name, href=url, target="_blank"), horizontal_space()] for name, url in external_links]
+                ))])
                 d += t
             d += tags.div(style="margin-bottom: 40px;")
             with tags.table(border=cell_border(), cellpadding=cell_padding()) as t:
@@ -668,7 +680,8 @@ def make_target_pages(tl: tlc.TargetList, pl: pr.PriorityList, other_files: dict
             # add all the associated tables as grids
             for table_name, other_table in other_tables.items():
                 for column_name in columns_to_skip.get(table_name, []):
-                    other_table.drop(column_name, axis=1, inplace=True)
+                    if column_name in other_table.columns:
+                        other_table.drop(column_name, axis=1, inplace=True)
                 if other_table.index.name == "Target Name":
                     if target_name in ot.index:
                         entries = other_table.loc[[target_name]].reset_index(drop=True)
