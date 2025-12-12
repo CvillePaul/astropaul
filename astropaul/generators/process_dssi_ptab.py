@@ -100,7 +100,7 @@ def process_dssi_ptab_files(files: list[str], out_dir: str = ".", database: str 
     if not database:
         database = database_path()
     with Connection(database) as conn:
-        targets = pd.read_sql("select * from targets;", conn)
+        targets = pd.read_sql("select * from targets where target_source like 'Kostov%';", conn)
         target_names = targets["target_name"]
         target_coords = SkyCoord(targets["ra"], targets["dec"], unit="deg")
         observations = pd.read_sql("select * from dssi_observations;", conn)
