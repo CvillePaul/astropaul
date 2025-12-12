@@ -13,7 +13,7 @@ import astropy.units as u
 import numpy as np
 import pandas as pd
 
-from astropaul.database import db_style_to_string
+from astropaul.database import db_style_to_string, string_to_db_style
 from astropaul.observing import ObservingSession
 import astropaul.phase as ph
 
@@ -312,10 +312,10 @@ def ancillary_data_from_tess(tl: TargetList, **kwargs) -> TargetList:
     tess_data = pd.read_sql("select * from tess_ticv8;", kwargs["connection"])
     if len(tess_data) > 0:
         convert_columns_to_human_style(tess_data)
-        answer.target_list = answer.target_list.merge(tess_data, on="Target Name", how="left")
         primary_columns = ["Vmag", "Teff"]
-        secondary_columns = [col for col in tess_data.columns if not col in primary_columns + ["Target Name"]]
-        answer.column_groups["TESS Data"] = (primary_columns, secondary_columns)
+        answer.target_list = answer.target_list.merge(tess_data[["Target Name"] + primary_columns], on="Target Name", how="left")
+        answer.other_lists["TESS"] = tess_data
+        answer.column_groups["TESS Data"] = (primary_columns, [])
     return answer
 
 
@@ -323,14 +323,14 @@ def add_columns_from_sql(tl: TargetList, table_name: str, primary_cols: list[str
     """Join columns from another table to the target list.  Other table must have a Target Name column."""
     verify_step_requirements(tl)
     answer = tl.copy()
-    other_table = pd.read_sql(f"select * from {table_name};", kwargs["connection"])
+    other_table = pd.read_sql(f"select * from {string_to_db_style(table_name)};", kwargs["connection"])
     if not other_table.empty:
         convert_columns_to_human_style(other_table)
         if not "Target Name" in other_table.columns:
             raise ValueError(f"Table {table_name} must have a column named Target Name")
         secondary_cols = [col for col in other_table.columns if col not in primary_cols + ["Target Name"]]
         answer.target_list = answer.target_list.merge(other_table, on="Target Name", how="left")
-        answer.column_groups[db_style_to_string(table_name)] = (primary_cols, secondary_cols)
+        answer.column_groups[table_name] = (primary_cols, secondary_cols)
     return answer
 
 
@@ -490,6 +490,14 @@ def filter_other_list(tl: TargetList, list_name: str, criteria, inverse: bool = 
     answer.target_list = answer.target_list[tl.target_list["Target Name"].isin(surviving_targets)]
     answer.list_criteria.add(code)
     return answer
+
+
+# def tabulate_ephemerides(tl: TargetList, **kwargs) -> TargetList:
+#     """Redo counting of ephemeris rows: 1.0 for rows with all values specified, 0.1 for rows lacking a duration"""
+#     verify_step_requirements(tl, {"Ephemerides"})
+#     for target_name, group in tl.other_lists["Ephemerides"].groupby("Target Name"):
+
+
 
 
 def add_dssi_phase(tl: TargetList, phase_event_defs: list[ph.PhaseEventDef], **kwargs) -> TargetList:
@@ -713,7 +721,7 @@ def add_pepsi_evaluations(tl: TargetList, **kwargs) -> TargetList:
     if len(evaluations) > 0:
         convert_columns_to_human_style(evaluations)
         pepsi_observations = answer.other_lists[table_name]
-        pepsi_observations = pepsi_observations.merge(evaluations, on="Spectrum File", how="left")
+        pepsi_observations = pepsi_observations.merge(evaluations[["Spectrum File", "Evaluation"]], on="Spectrum File", how="left")
         answer.other_lists[table_name] = pepsi_observations
     return answer
 
@@ -760,10 +768,11 @@ def add_database_table(tl: TargetList, table_name: str, add_count: bool = True, 
     verify_step_requirements(tl)
     answer = tl.copy()
     conn = kwargs["connection"]
-    table_contents = pd.read_sql(f"select * from {table_name};", conn)
+    sql_name = string_to_db_style(table_name)
+    table_contents = pd.read_sql(f"select * from {sql_name};", conn)
     # apply any transformations, such as units
     table_metadata = pd.read_sql(
-        f"select column_name, value from table_metadata where table_name = '{table_name}' and value_type='unit';", conn
+        f"select column_name, value from table_metadata where table_name = '{sql_name}' and value_type='unit';", conn
     )
     for column_name, unit in table_metadata[["column_name", "value"]].values:
         match unit:
@@ -772,17 +781,25 @@ def add_database_table(tl: TargetList, table_name: str, add_count: bool = True, 
             case _:  # by default, assume the unit is an astropy unit
                 table_contents[column_name] = [u.Quantity(value, unit=unit) for value in table_contents[column_name]]
     convert_columns_to_human_style(table_contents)
-    human_name = db_style_to_string(table_name)
     # for tables that indicate target name, restrict table to targets in this TargetList
     if "Target Name" in table_contents.columns:
         all_targets = list(tl.target_list["Target Name"].unique())
         table_contents = table_contents[table_contents["Target Name"].isin(all_targets)]
         if add_count:  # optionally add a column to the TargetList indicating num rows (in this table) per target
-            count_column = f"Num {human_name}"
+            count_column = f"Num {table_name}"
             counts = table_contents["Target Name"].value_counts()
             answer.target_list[count_column] = answer.target_list["Target Name"].map(counts).fillna(0).astype(int)
             primary_columns, secondary_columns = answer.column_groups.get("Count", ([], []))
             primary_columns.append(count_column)
             answer.column_groups["Count"] = (primary_columns, secondary_columns)
-    answer.other_lists[human_name] = table_contents
+    answer.other_lists[table_name] = table_contents
+    return answer
+
+def add_resource(tl: TargetList, resource: str, table_name: str, **kwargs) -> TargetList:
+    verify_step_requirements(tl, {table_name})
+    answer = tl.copy()
+    conn = kwargs["connection"]
+    resources = pd.read_sql(f"select * from resource_{string_to_db_style(resource)};", conn)
+    convert_columns_to_human_style(resources)
+    answer.other_lists[table_name] = answer.other_lists[table_name].merge(resources, on="ID", how="left")
     return answer
