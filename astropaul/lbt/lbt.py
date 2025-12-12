@@ -5,7 +5,7 @@ from astropy.io import fits
 from astropy.time import Time
 import astropy.units as u
 import matplotlib.pyplot as plt
-from matplotlib.ticker import MaxNLocator, AutoLocator, AutoMinorLocator
+from matplotlib.ticker import MaxNLocator, AutoMinorLocator
 import pandas as pd
 from specutils import Spectrum
 
@@ -20,6 +20,7 @@ def add_pepsi_params(
     cd_blue: int,
     cd_red: int,
     snr: int,
+    num_exp: int = 1,
     binocular: bool = False,
     priority: str = "",
     notes: str = "",
@@ -29,9 +30,9 @@ def add_pepsi_params(
     answer = tl.copy()
     answer.target_list[f"{column_prefix}fiber"] = fiber
     answer.target_list[f"{column_prefix}cd_blue"] = cd_blue
-    answer.target_list[f"{column_prefix}cd_blue_num_exp"] = 1
+    answer.target_list[f"{column_prefix}cd_blue_num_exp"] = num_exp
     answer.target_list[f"{column_prefix}cd_red"] = cd_red
-    answer.target_list[f"{column_prefix}cd_red_num_exp"] = 1
+    answer.target_list[f"{column_prefix}cd_red_num_exp"] = num_exp
     answer.target_list[f"{column_prefix}snr"] = snr
     answer.target_list[f"{column_prefix}exp_time"] = [
         round(
@@ -53,8 +54,7 @@ def add_pepsi_params(
 
 def assign_rv_standards(tl: tlc.TargetList, target_types: set[str], drop_unused: bool = True, **kwargs) -> pd.DataFrame:
     def find_standard(target_coord: SkyCoord, teff: float, standards: pd.DataFrame, standards_coords: SkyCoord) -> int:
-        nearby_standards = standards[target_coord.separation(standards_coords) < 60 * u.deg]
-        print(len(nearby_standards))
+        nearby_standards = standards[abs(standards["RA"] - target_coord.ra) < 15 * u.deg]
         closest_idx = (nearby_standards["Teff"] - teff).abs().idxmin()
         if closest_idx == closest_idx:
             return nearby_standards.loc[closest_idx, "Target Name"]
@@ -95,7 +95,7 @@ def make_lbt_readme_table(target_list: pd.DataFrame, beg_lst: float = 0) -> pd.D
     # build up the output table
     readme = pd.DataFrame()
     readme["Target Name"] = targets["Target Name"]
-    readme["RA"] = coords.ra.to_string(unit=u.hour, sep=":", precision=2)
+    readme["RA"] = coords.ra.to_string(unit=u.hour, sep=":", precision=2, pad=True)
     readme["Dec"] = coords.dec.to_string(unit=u.hour, sep=":", precision=2, alwayssign=True)
     readme["Vmag"] = targets["Vmag"]
     readme["Teff"] = [f"{val:.0f}" for val in targets["Teff"]]
@@ -110,26 +110,48 @@ def make_lbt_readme_table(target_list: pd.DataFrame, beg_lst: float = 0) -> pd.D
     readme["Desired RED SNR"] = targets["PEPSI snr"]
     readme["Priority"] = targets["PEPSI priority"]
     readme["Notes"] = targets["PEPSI notes"]
-    return readme
+    short_cols = [
+        "Target Name",
+        "RA",
+        "Dec",
+        "Vmag",
+        "Teff",
+        "Fiber",
+        "CD_b",
+        "NExp_b",
+        "Exp_b",
+        "CD_r",
+        "NExp_r",
+        "Exp_r",
+        "SNR_b",
+        "SNR_r",
+        "Priority",
+        "Notes",
+    ]
+    return readme, short_cols
 
 
 def write_lbt_readme_file(file_base: str, targets: pd.DataFrame, session: obs.ObservingSession) -> str:
-    readme = make_lbt_readme_table(targets, session.starting_lst - 60)
+    table, short_cols = make_lbt_readme_table(targets, session.starting_lst - 60)
+    table = table.sort_values(["Notes", "Target Name"])
     # save target list as csv
-    readme.to_csv(
+    table.to_csv(
         file_base + ".csv",
         index=False,
     )
     # make the readme file by prepending/appending the header/footer info
+    table.columns = short_cols
+    ljust_cols = ["Target Name", "Priority", "Notes"]
+    table[ljust_cols] = table[ljust_cols].apply(lambda s: (s := s.astype(str).str.strip()).str.ljust(s.str.len().max()))
     readme_header = open(file_base + ".README.header", "r").readlines()
     readme_footer = open(file_base + ".README.footer", "r").readlines()
     output = ""
     for line in readme_header:
         output += line.rstrip() + "\n"
-    output += readme.to_string(index=False)
+    output += table.to_string(index=False, justify="center")
     for line in readme_footer:
         output += line.rstrip() + "\n"
-    with open(file_base + ".README", "w") as f:
+    with open(file_base + ".readme", "w") as f:
         f.write(output)
     return output
 
@@ -154,6 +176,7 @@ def read_pepsi_file(filename: str) -> Spectrum:
     spectrum.meta["Barycenter RV"] = barycentric_rv
     spectrum.meta["Filename"] = filename
     return spectrum
+
 
 def plot_pepsi_spectrum(spectrum: Spectrum):
     fig, ax = plt.subplots(figsize=(10, 8))
