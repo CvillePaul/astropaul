@@ -96,7 +96,7 @@ def make_lbt_readme_table(target_list: pd.DataFrame, beg_lst: float = 0) -> pd.D
     readme = pd.DataFrame()
     readme["Target Name"] = targets["Target Name"]
     readme["RA"] = coords.ra.to_string(unit=u.hour, sep=":", precision=2, pad=True)
-    readme["Dec"] = coords.dec.to_string(unit=u.hour, sep=":", precision=2, alwayssign=True)
+    readme["Dec"] = coords.dec.to_string(unit=u.deg, sep=":", precision=2, alwayssign=True)
     readme["Vmag"] = targets["Vmag"]
     readme["Teff"] = [f"{val:.0f}" for val in targets["Teff"]]
     readme["Fiber"] = targets["PEPSI fiber"]
@@ -143,6 +143,8 @@ def write_lbt_readme_file(file_base: str, targets: pd.DataFrame, session: obs.Ob
     table.columns = short_cols
     ljust_cols = ["Target Name", "Priority", "Notes"]
     table[ljust_cols] = table[ljust_cols].apply(lambda s: (s := s.astype(str).str.strip()).str.ljust(s.str.len().max()))
+    table["RA"] = [f" {ra} " for ra in table["RA"]]
+    table["Dec"] = [f" {dec} " for dec in table["Dec"]]
     readme_header = open(file_base + ".README.header", "r").readlines()
     readme_footer = open(file_base + ".README.footer", "r").readlines()
     output = ""
