@@ -1,6 +1,6 @@
 import astropy.units as u
 
-from astropaul.targetlistcreator import TargetList
+from astropaul.targetlistcreator.targetlistcreator import TargetList
 
 def add_gemini_speckle_params(tl: TargetList, **kwargs) -> TargetList:
     # For more info, see https://www.gemini.edu/instrumentation/alopeke-zorro/proposal-preparation

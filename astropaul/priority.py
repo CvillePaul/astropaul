@@ -8,7 +8,8 @@ import astropy.units as u
 import numpy as np
 import pandas as pd
 
-import astropaul.targetlistcreator as tlc
+import astropaul.targetlistcreator.targetlistcreator as tlc
+from astropaul.observing import ObservingSession
 import astropaul.phase as ph
 
 
@@ -16,7 +17,7 @@ class PriorityList:
     def __init__(
         self,
         target_list: tlc.TargetList,
-        session: tlc.ObservingSession,
+        session: ObservingSession,
         interval: u.Quantity = 1 * u.hour,
         skip_partial: bool = True,
     ):

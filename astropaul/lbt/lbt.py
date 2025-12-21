@@ -10,7 +10,7 @@ import pandas as pd
 from specutils import Spectrum
 
 import astropaul.observing as obs
-import astropaul.targetlistcreator as tlc
+import astropaul.targetlistcreator.targetlistcreator as tlc
 from .exposure_time import pepsi_exptime
 
 

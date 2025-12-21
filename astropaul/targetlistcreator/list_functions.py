@@ -1,199 +1,20 @@
 import collections
-import datetime
-from functools import partial
 import inspect
-from sqlite3 import Connection
-from typing import Any
+from functools import partial
 
-import astroplan as ap
-from astropy.coordinates import SkyCoord, Angle, get_body
+from astropy.coordinates import SkyCoord
 from astropy.table import Table
 from astropy.time import Time
 import astropy.units as u
-import numpy as np
 import pandas as pd
 
-from astropaul.database import db_style_to_string, string_to_db_style
+from astropaul.database import string_to_db_style
 from astropaul.observing import ObservingSession
 import astropaul.phase as ph
 
+from .targetlistcreator import TargetList, convert_columns_to_human_style, verify_step_requirements
+
 import __main__
-
-
-class TargetListCriterion:
-    def __init__(self, criterion: str, children: list["TargetListCriterion"] = None):
-        self.criterion = criterion
-        self.children = children or list()
-
-    def copy(self) -> "TargetListCriterion":
-        answer = TargetListCriterion(criterion=self.criterion, children=self.children.copy())
-        return answer
-
-    def __repr__(self) -> str:
-        answer = self.criterion
-        if self.children and len(self.children) > 0:
-            for child in self.children:
-                for line in str(child).split("\n"):
-                    answer += f"\n  {line}"
-        return answer
-
-
-class TargetListCriteria:
-    def __init__(self, criteria: list[TargetListCriterion] = None):
-        self.criteria = criteria or []
-
-    def copy(self) -> "TargetListCriteria":
-        answer = TargetListCriteria([criterion.copy() for criterion in self.criteria])
-        return answer
-
-    def add(self, criterion) -> None:
-        if isinstance(criterion, str):
-            self.criteria.append(TargetListCriterion(criterion))
-        elif isinstance(criterion, TargetListCriterion):
-            self.criteria.append(criterion)
-        else:
-            raise ValueError("Bad type for criterion")
-
-    def __repr__(self) -> str:
-        answer = ""
-        for criterion in self.criteria:
-            answer += f"{criterion}\n"
-        return answer
-
-    def __len__(self) -> int:
-        return len(self.criteria)
-
-    def __iter__(self):
-        return iter(self.criteria)
-
-
-class TargetList:
-    def __init__(
-        self,
-        name: str = "Target List",
-        target_list: pd.DataFrame = None,
-        list_criteria: TargetListCriteria = None,
-        column_groups: dict[str, tuple[list[str], list[str]]] = None,
-        other_lists: dict[str, pd.DataFrame] = None,
-    ):
-        self.name = name
-        self.target_list = target_list if target_list is not None else pd.DataFrame()
-        self.list_criteria = list_criteria or TargetListCriteria()
-        self.column_groups = column_groups or collections.defaultdict(list)
-        if not other_lists:
-            self.other_lists = dict()
-        else:
-            self.other_lists = other_lists
-
-    def copy(self) -> "TargetList":
-        answer = TargetList(
-            name=self.name,
-            target_list=self.target_list.copy(),
-            list_criteria=self.list_criteria.copy(),
-            column_groups=self.column_groups.copy(),
-            other_lists={key: value.copy() for key, value in self.other_lists.items()},
-        )
-        return answer
-
-    def add_columns(self, columns: dict[str, Any] = {}):
-        pass
-
-    def add_other(self, name: str, other: pd.DataFrame):
-        self.other_lists[name] = other
-
-    def summarize(self) -> str:
-        answer = f"Name: {self.name}\n"
-        answer += "Criteria:\n"
-        if len(self.list_criteria) > 0:
-            for line in str(self.list_criteria).split("\n"):
-                answer += f"  {line}\n"
-        else:
-            answer += "    (none)\n"
-        target_types = collections.Counter(self.target_list["Target Type"])
-        answer += f"{len(self.target_list)} targets:\n"
-        for type, count in target_types.items():
-            answer += f"  {count:4d} {type}\n"
-        answer += "Column Count (primary, secondary):\n"
-        for name, (primary, secondary) in self.column_groups.items():
-            answer += f"    {name}: ({len(primary)}, {len(secondary)})\n"
-        answer += "Associated tables:\n"
-        for name, other in self.other_lists.items():
-            answer += f"    {len(other):4d} rows, {len(other.columns):2d} columns: {name}\n"
-        return answer
-
-    @staticmethod
-    def union(tls: list["TargetList"], name: str = "Merged Target List") -> "TargetList":
-        if not tls or len(tls) == 0:
-            raise ValueError("Must supply at least one TargetList")
-        answer = tls[0].copy()
-        answer.name = name
-        for tl in tls[1:]:
-            answer.target_list = pd.concat([answer.target_list, tl.target_list], ignore_index=True)
-            answer.column_groups |= tl.column_groups
-            for table_name, table in tl.other_lists.items():
-                if table_name in answer.other_lists:
-                    answer.other_lists[table_name] = pd.concat([answer.other_lists[table_name], table])
-                else:
-                    answer.other_lists[table_name] = table
-        answer.list_criteria = TargetListCriteria(
-            [
-                TargetListCriterion(
-                    f"Union of lists: {" and ".join([f"{tl.name}" for tl in tls])}:",
-                    TargetListCriteria([TargetListCriterion(f"List {tl.name}:", tl.list_criteria) for tl in tls]),
-                )
-            ]
-        )
-        return answer
-
-
-class TargetListCreator:
-    def __init__(self, name: str = "Standard", connection: Connection = None, steps: list = None, **kwargs):
-        self.name = name
-        self.connection = connection
-        self.kwargs = kwargs.copy()
-        self.steps = steps
-
-    def calculate(
-        self, initial_list: TargetList = None, steps=None, name: str = None, verbose: bool = False, **kwargs
-    ) -> TargetList:
-        """
-        Create a new target list by running through self.steps and returning the result
-        """
-        intermediate_tl = initial_list.copy() if initial_list else TargetList(name=name or self.name)
-        merged_kwargs = {"connection": self.connection, **self.kwargs, **kwargs}
-        if steps is None:
-            steps = self.steps
-        for step in steps:
-            intermediate_tl = step(intermediate_tl, **merged_kwargs)
-            if verbose:
-                print(f"{len(intermediate_tl.target_list):4d} targets, {datetime.datetime.now()}, {step=}")
-        if verbose:
-            print(intermediate_tl.summarize())
-        return intermediate_tl
-
-
-# some convenience functions
-def convert_columns_to_human_style(df: pd.DataFrame) -> None:
-    if index_name := df.index.name:
-        df.index.name = db_style_to_string(index_name)
-    df.columns = map(db_style_to_string, df)
-
-
-def verify_step_requirements(tl: TargetList, required_tables: set[str] = None, required_columns: set[str] = None):
-    if tl.target_list.empty:
-        raise ValueError("Target List cannot be empty")
-    if required_tables:
-        existing_tables = set(tl.other_lists.keys())
-        if not required_tables.issubset(existing_tables):
-            raise ValueError(f"Required table(s) missing: {required_tables - existing_tables}")
-    if required_columns:
-        existing_columns = set(tl.target_list.columns)
-        if not required_columns.issubset(existing_columns):
-            raise ValueError(f"Required column(s) missing: {required_columns - existing_columns}")
-
-
-# following are methods are meant to be used as steps of a TargetListCreator
-
 
 def add_targets(tl: TargetList = None, **kwargs) -> TargetList:
     """Add rows for each target in the database"""
@@ -313,7 +134,9 @@ def ancillary_data_from_tess(tl: TargetList, **kwargs) -> TargetList:
     if len(tess_data) > 0:
         convert_columns_to_human_style(tess_data)
         primary_columns = ["Vmag", "Teff"]
-        answer.target_list = answer.target_list.merge(tess_data[["Target Name"] + primary_columns], on="Target Name", how="left")
+        answer.target_list = answer.target_list.merge(
+            tess_data[["Target Name"] + primary_columns], on="Target Name", how="left"
+        )
         answer.other_lists["TESS"] = tess_data
         answer.column_groups["TESS Data"] = (primary_columns, [])
     return answer
@@ -340,98 +163,6 @@ def hide_cols(tl: TargetList, prefix: str, **kwargs) -> TargetList:
     if len(cols_to_remove) > 0:
         answer.target_list.drop(labels=cols_to_remove, axis=1, inplace=True)
     del answer.column_groups[prefix]
-    return answer
-
-
-def add_observability(
-    tl: TargetList,
-    observing_session: ObservingSession,
-    observability_threshold: tuple[u.Quantity, u.Quantity] = (30 * u.deg, 80 * u.deg),
-    constraints: list[ap.Constraint] = None,
-    column_prefix: str = "Observable ",
-    calc_moon_distance: bool = False,
-    time_resolution=15 * u.min,
-    **kwargs,
-) -> TargetList:
-    lo_alt, hi_alt = observability_threshold[0].to(u.deg).value, observability_threshold[1].to(u.deg).value
-    if not constraints:
-        constraints = [
-            ap.AltitudeConstraint(lo_alt, hi_alt, True),
-        ]
-    coords = SkyCoord(ra=tl.target_list["RA"].values * u.deg, dec=tl.target_list["Dec"].values * u.deg)
-
-    # calculate observability for each time segment of the observing session
-    answer = tl.copy()
-    location = observing_session.observer.name or observing_session.observer.location
-    answer.list_criteria.add(f"Observability calculated at {location} in {time_resolution} intervals")
-    for constraint in constraints:
-        answer.list_criteria.add(f"{constraint.__class__.__name__}: {vars(constraint)}")
-    overall_any_night = np.array([False] * len(answer.target_list))
-    overall_every_night = np.array([True] * len(answer.target_list))
-    overall_max_alts = np.array([-90.0] * len(answer.target_list))
-    overall_min_hours_observable = np.array([24] * len(answer.target_list))
-    overall_min_moon_dist = np.array([180.0] * len(answer.target_list))
-    nightly_columns = []
-    new_cols = {}
-    for beg, end in observing_session.observing_segments:
-        time_grid = ap.utils.time_grid_from_range((beg, end), time_resolution=time_resolution)
-        segment_alts = [observing_session.observer.altaz(time_grid, coord).alt.value for coord in coords]
-        segment_good_alts = [
-            len(target_alts[(lo_alt <= target_alts) & (target_alts <= hi_alt)]) for target_alts in segment_alts
-        ]
-        segment_hours_observable = (segment_good_alts * time_resolution).to(u.hour).value
-        segment_max_alts = [np.max(target_alts) for target_alts in segment_alts]
-        segment_observability = list(map(lambda x: x > 0, segment_good_alts))
-        column_name = f"{column_prefix}{beg.iso[:10]}"
-        new_cols[column_name] = segment_observability
-        overall_any_night |= segment_observability
-        overall_every_night &= segment_observability
-        nightly_columns.append(column_name)
-        hours_observable_column = f"{column_name} Hours Observable"
-        overall_min_hours_observable = [
-            np.min([current_min_hours, this_min_hours])
-            for current_min_hours, this_min_hours in zip(overall_min_hours_observable, segment_hours_observable)
-        ]
-        new_cols[hours_observable_column] = segment_hours_observable
-        nightly_columns.append(hours_observable_column)
-        max_alt_column = f"{column_name} Max Alt"
-        new_cols[max_alt_column] = segment_max_alts
-        nightly_columns.append(max_alt_column)
-        overall_max_alts = [
-            np.max([current_max_alt, this_alt]) for current_max_alt, this_alt in zip(overall_max_alts, segment_max_alts)
-        ]
-        if calc_moon_distance:
-            # the moon doesn't move much, so just calculate the distance at the start of the night
-            moon = get_body("moon", beg, observing_session.observer.location)
-            moon_dist_column = f"{column_name} Min Moon Dist"
-            # NOTE: for some reason it has to be moon.separation(coords) not coords.separation(moon)!!!
-            dist = moon.separation(coords).value
-            new_cols[moon_dist_column] = dist
-            nightly_columns.append(moon_dist_column)
-            overall_min_moon_dist = [
-                np.min([current_min_dist, this_dist]) for current_min_dist, this_dist in zip(overall_min_moon_dist, dist)
-            ]
-    any_night_column = f"{column_prefix}Any Night"
-    new_cols[any_night_column] = overall_any_night
-    every_night_column = f"{column_prefix}Every Night"
-    new_cols[every_night_column] = overall_every_night
-    main_columns = [any_night_column, every_night_column]
-    max_alt_column = f"{column_prefix}Max Alt"
-    new_cols[max_alt_column] = overall_max_alts
-    main_columns.append(max_alt_column)
-    min_hours_observable_column = f"{column_prefix}Hours Min"
-    new_cols[min_hours_observable_column] = overall_min_hours_observable
-    main_columns.append(min_hours_observable_column)
-    if calc_moon_distance:
-        moon_dist_column = f"{column_prefix}Min Moon Dist"
-        new_cols[moon_dist_column] = overall_min_moon_dist
-        main_columns.append(moon_dist_column)
-    answer.target_list = answer.target_list.assign(**new_cols)
-    answer.column_groups[column_prefix.strip()] = (main_columns, nightly_columns)
-    moon_phases = pd.DataFrame()
-    moon_phases["Time"] = [beg.iso[:10] for beg, _ in observing_session.observing_segments]
-    moon_phases["Phase"] = [ap.moon_illumination(t) for t, _ in observing_session.observing_segments]
-    answer.add_other("Lunar Phases", moon_phases)
     return answer
 
 
@@ -492,12 +223,18 @@ def filter_other_list(tl: TargetList, list_name: str, criteria, inverse: bool = 
     return answer
 
 
-# def tabulate_ephemerides(tl: TargetList, **kwargs) -> TargetList:
-#     """Redo counting of ephemeris rows: 1.0 for rows with all values specified, 0.1 for rows lacking a duration"""
-#     verify_step_requirements(tl, {"Ephemerides"})
-#     for target_name, group in tl.other_lists["Ephemerides"].groupby("Target Name"):
-
-
+def tabulate_ephemerides(tl: TargetList, **kwargs) -> TargetList:
+    """Redo counting of ephemeris rows: 1.0 for rows with all values specified, 0.1 for rows lacking a duration"""
+    verify_step_requirements(tl, {"Ephemerides"})
+    answer = tl.copy()
+    ephem = tl.other_lists["Ephemerides"].copy()
+    ephem["score"] = ephem["Duration"].apply(lambda x: 1.0 if x == x else 0.1)
+    ephem_scores = ephem.groupby("Target Name", as_index=False)["score"].sum()
+    ephem_scores.columns = ["Target Name", "Num Ephemerides"]
+    answer.target_list.drop("Num Ephemerides", axis=1, inplace=True)
+    answer.target_list = answer.target_list.merge(ephem_scores, on="Target Name", how="left")
+    answer.target_list["Num Ephemerides"] = answer.target_list["Num Ephemerides"].fillna(0.0)
+    return answer
 
 
 def add_dssi_phase(tl: TargetList, phase_event_defs: list[ph.PhaseEventDef], **kwargs) -> TargetList:
@@ -721,7 +458,9 @@ def add_pepsi_evaluations(tl: TargetList, **kwargs) -> TargetList:
     if len(evaluations) > 0:
         convert_columns_to_human_style(evaluations)
         pepsi_observations = answer.other_lists[table_name]
-        pepsi_observations = pepsi_observations.merge(evaluations[["Spectrum File", "Evaluation"]], on="Spectrum File", how="left")
+        pepsi_observations = pepsi_observations.merge(
+            evaluations[["Spectrum File", "Evaluation"]], on="Spectrum File", how="left"
+        )
         answer.other_lists[table_name] = pepsi_observations
     return answer
 
@@ -794,6 +533,7 @@ def add_database_table(tl: TargetList, table_name: str, add_count: bool = True, 
             answer.column_groups["Count"] = (primary_columns, secondary_columns)
     answer.other_lists[table_name] = table_contents
     return answer
+
 
 def add_resource(tl: TargetList, resource: str, table_name: str, **kwargs) -> TargetList:
     verify_step_requirements(tl, {table_name})

@@ -14,7 +14,7 @@ import pandas as pd
 
 from astropaul.database import html_path, resources_path
 import astropaul.priority as pr
-import astropaul.targetlistcreator as tlc
+import astropaul.targetlistcreator.targetlistcreator as tlc
 
 
 def default_table_css(table_id: str) -> str:
@@ -359,8 +359,8 @@ def make_numerical_scores_pages(
                 "Vmag",
                 "Teff",
                 "Num Ephemerides",
-                "Num DSSI Observations",
-                "Num Speckle Detections",
+                # "Num DSSI Observations",
+                # "Num Speckle Detections",
                 "Num PEPSI Observations",
             ]
             pt = tl.target_list[["Target Name"] + target_columns].merge(
