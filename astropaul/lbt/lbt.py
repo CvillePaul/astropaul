@@ -97,7 +97,7 @@ def make_lbt_readme_table(target_list: pd.DataFrame, beg_lst: float = 0) -> pd.D
     readme["Target Name"] = targets["Target Name"]
     readme["RA"] = coords.ra.to_string(unit=u.hour, sep=":", precision=2, pad=True)
     readme["Dec"] = coords.dec.to_string(unit=u.deg, sep=":", precision=2, alwayssign=True)
-    readme["Vmag"] = targets["Vmag"]
+    readme["Vmag"] = [f"{mag: .1f}" for mag in targets["Vmag"]]
     readme["Teff"] = [f"{val:.0f}" for val in targets["Teff"]]
     readme["Fiber"] = targets["PEPSI fiber"]
     readme["BLUE Cross Disperser"] = targets["PEPSI cd_blue"]
