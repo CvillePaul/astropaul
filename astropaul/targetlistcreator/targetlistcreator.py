@@ -3,6 +3,7 @@ import datetime
 from sqlite3 import Connection
 from typing import Any
 
+import numpy as np
 import pandas as pd
 
 from astropaul.database import db_style_to_string
@@ -109,6 +110,8 @@ class TargetList:
         answer += "Associated tables:\n"
         for name, other in self.other_lists.items():
             answer += f"    {len(other):4d} rows, {len(other.columns):2d} columns: {name}\n"
+        if "PEPSI exp_time" in self.target_list.columns:
+            answer += f"\nTotal PEPSI exposure time: {np.sum(self.target_list["PEPSI exp_time"])/60:.1f} minutes"
         return answer
 
     @staticmethod
