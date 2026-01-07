@@ -10,6 +10,7 @@ import dominate
 import dominate.tags as tags
 import dominate.util as util
 import itables
+import numpy as np
 import pandas as pd
 
 from astropaul.database import html_path, resources_path
@@ -174,8 +175,13 @@ def make_summary_page(tl: tlc.TargetList, pl: pr.PriorityList, other_files: dict
             d += tags.h2("List Criteria")
             criteria = tags.ul()
             for line in str(tl.list_criteria).split("\n"):
-                criteria += tags.li(tags.pre(line))
+                if line:
+                    criteria += tags.li(tags.pre(line))
             d += criteria
+
+        if "PEPSI exp_time" in tl.target_list.columns:
+            d += tags.br()
+            d += tags.h2(f"\nTotal PEPSI exposure time: {np.sum(tl.target_list["PEPSI exp_time"])/60:.1f} minutes")
 
         # output information about other files
         if other_files:
