@@ -90,6 +90,14 @@ def pick_category(categories: CategoryTable, value: float) -> Any:
             return result
 
 
+def calculate_ephemerides_priority(pl: PriorityList, categories: CategoryTable) -> Any:
+    for _, row in pl.target_list.target_list.iterrows():
+        target_name = row["Target Name"]
+        ephem_priority = pick_category(categories, row["Num Ephemerides"])
+        for segment_table in pl.target_tables[target_name]:
+            segment_table["Ephemerides Priority"] = ephem_priority
+
+
 def calculate_moon_priority(
     pl: PriorityList, illumination_categories: CategoryTable = None, dist_categories: CategoryTable = None
 ) -> None:
