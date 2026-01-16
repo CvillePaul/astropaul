@@ -26,16 +26,19 @@ def add_targets(tl: TargetList = None, **kwargs) -> TargetList:
     important_columns = ["Target Name", "RA", "Dec"]
     column_groups = {"Target": (important_columns, [column for column in targets.columns if not column in important_columns])}
     answer = TargetList(name=tl.name, target_list=targets, column_groups=column_groups)
+    answer.list_criteria.add(f"All targets loaded ({len(answer.target_list)} targets remain)")
     return answer
 
 
 def concat_dataframe(tl: TargetList, other_df: pd.DataFrame, **kwargs) -> TargetList:
-    return TargetList(
+    answer = TargetList(
         name=tl.name,
         target_list=pd.concat([tl.target_list, other_df]),
         column_groups=tl.column_groups,
         other_lists=tl.other_lists,
     )
+    answer.list_criteria.add(f"Other dataframe concatenated ({len(answer.target_list)} targets remain)")
+    return answer
 
 
 def add_lists(tl: TargetList, **kwargs) -> TargetList:
@@ -185,7 +188,7 @@ def filter_targets(
         answer.target_list = answer.target_list[~criteria(answer.target_list)]
     else:
         answer.target_list = answer.target_list[criteria(answer.target_list)]
-    answer.list_criteria.add(code)
+    answer.list_criteria.add(code + f" ({len(answer.target_list)} targets remain)")
     return answer
 
 
