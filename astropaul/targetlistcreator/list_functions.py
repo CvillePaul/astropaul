@@ -133,7 +133,7 @@ def ancillary_data_from_tess(tl: TargetList, **kwargs) -> TargetList:
     tess_data = pd.read_sql("select * from tess_ticv8;", kwargs["connection"])
     if len(tess_data) > 0:
         convert_columns_to_human_style(tess_data)
-        primary_columns = ["Vmag", "Teff"]
+        primary_columns = ["Vmag", "Teff", "PMra", "PMdec"]
         answer.target_list = answer.target_list.merge(
             tess_data[["Target Name"] + primary_columns], on="Target Name", how="left"
         )
