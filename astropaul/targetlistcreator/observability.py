@@ -28,7 +28,8 @@ def add_observability(
     # calculate observability for each time segment of the observing session
     answer = tl.copy()
     location = observing_session.observer.name or observing_session.observer.location
-    answer.list_criteria.add(f"Observability calculated at {location} in {time_resolution} intervals")
+    time_range = f"{observing_session.time_range[0].iso[:10]} to {observing_session.time_range[1].iso[:10]}"
+    answer.list_criteria.add(f"Observability calculated at {location} in {time_resolution} intervals from {time_range}")
     for constraint in constraints:
         answer.list_criteria.add(f"{constraint.__class__.__name__}: {vars(constraint)}")
     overall_any_night = np.array([False] * len(answer.target_list))
