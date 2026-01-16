@@ -43,7 +43,7 @@ def db_style_to_string(name: str) -> str:
     answer = answer.title()
     for string in ["Jd", "Utc", "Id", "Dssi", "Ra", "Hms", "Dms", "Pepsi", "Rv", "Pm"]:
         answer = answer.replace(string, string.upper())
-    special_cases = [("Zorroalopeke", "ZorroAlopeke"), ("Spectrumplot", "SpectrumPlot")]
+    special_cases = [("Zorroalopeke", "ZorroAlopeke"), ("Spectrumplot", "SpectrumPlot"), ("Hrcam", "HRCam")]
     for original, new in special_cases:
         answer = answer.replace(original, new)
     return answer
