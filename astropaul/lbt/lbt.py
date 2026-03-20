@@ -55,6 +55,8 @@ def add_pepsi_params(
 def assign_rv_standards(tl: tlc.TargetList, target_types: set[str], drop_unused: bool = True, **kwargs) -> pd.DataFrame:
     def find_standard(target_coord: SkyCoord, teff: float, standards: pd.DataFrame, standards_coords: SkyCoord) -> int:
         nearby_standards = standards[abs(standards["RA"] - target_coord.ra) < 15 * u.deg]
+        if nearby_standards.empty:
+            nearby_standards = standards[abs(standards["RA"] - target_coord.ra) < 30 * u.deg]
         closest_idx = (nearby_standards["Teff"] - teff).abs().idxmin()
         if closest_idx == closest_idx:
             return nearby_standards.loc[closest_idx, "Target Name"]
@@ -131,31 +133,18 @@ def make_lbt_readme_table(target_list: pd.DataFrame, beg_lst: float = 0) -> pd.D
     return readme, short_cols
 
 
-def write_lbt_readme_file(file_base: str, targets: pd.DataFrame, session: obs.ObservingSession) -> str:
+def write_lbt_readme_file(header: str, footer: str, targets: pd.DataFrame, session: obs.ObservingSession) -> str:
     table, short_cols = make_lbt_readme_table(targets, session.starting_lst - 60)
     table = table.sort_values(["Notes", "Target Name"])
-    # save target list as csv
-    table.to_csv(
-        file_base + ".csv",
-        index=False,
-    )
-    # make the readme file by prepending/appending the header/footer info
     table.columns = short_cols
     ljust_cols = ["Target Name", "Priority", "Notes"]
     table[ljust_cols] = table[ljust_cols].apply(lambda s: (s := s.astype(str).str.strip()).str.ljust(s.str.len().max()))
     table["RA"] = [f" {ra} " for ra in table["RA"]]
     table["Dec"] = [f" {dec} " for dec in table["Dec"]]
-    readme_header = open(file_base + ".README.header", "r").readlines()
-    readme_footer = open(file_base + ".README.footer", "r").readlines()
-    output = ""
-    for line in readme_header:
-        output += line.rstrip() + "\n"
+    output = header
     output += table.to_string(index=False, justify="center")
-    for line in readme_footer:
-        output += line.rstrip() + "\n"
-    with open(file_base + ".readme", "w") as f:
-        f.write(output)
-    return output
+    output += footer
+    return table, output
 
 
 def read_pepsi_file(filename: str) -> Spectrum:
@@ -163,7 +152,7 @@ def read_pepsi_file(filename: str) -> Spectrum:
     header = hdul[0].header
     target_name = header["OBJECT"]
     location = EarthLocation(lat=header["LATITUDE"], lon=header["LONGITUD"], height=header["ALTITUDE"])
-    obs_time = Time(f"{header["DATE-OBS"]} {header["TIME-OBS"]}", format="iso")
+    obs_time = Time(f'{header["DATE-OBS"]} {header["TIME-OBS"]}', format="iso")
     coord = SkyCoord(ra=header["RA2000"], dec=header["DE2000"], unit=(u.hourangle, u.deg), frame="icrs")
     barycentric_rv = coord.radial_velocity_correction(kind="barycentric", obstime=obs_time, location=location)
     # barycentric_rv = header["SSBVEL"] * u.m / u.s
@@ -195,5 +184,5 @@ def plot_pepsi_spectrum(spectrum: Spectrum):
     ax.grid(axis="x", color="0.70", which="major")
     ax.grid(axis="x", color="0.95", which="minor")
     filename = Path(spectrum.meta["Filename"]).name
-    ax.set_title(f"{spectrum.meta["Target Name"]}   {spectrum.meta["Observation Time"].iso[:19]}   {filename}")
+    ax.set_title(f'{spectrum.meta["Target Name"]}   {spectrum.meta["Observation Time"].iso[:19]}   {filename}')
     return fig, ax
