@@ -366,7 +366,7 @@ def add_system_configuration(
             eclipse_found = False
             for _, ephem_row in system_ephem.sort_values("Member").iterrows():
                 member_ephem = ph.Ephemeris.from_dataframe_row(ephem_row)
-                phases += f"{system}{ephem_row["Member"]}: {ph.calc_phase(member_ephem, observation_time):.2f} "
+                phases += f'{system}{ephem_row["Member"]}: {ph.calc_phase(member_ephem, observation_time):.2f} '
                 if member_ephem.duration != member_ephem.duration:
                     continue  # skip calculation for members with no duration specified
                 event_list = ph.PhaseEventList.calc_phase_events(
@@ -378,7 +378,7 @@ def add_system_configuration(
                     duration_percent = 1 - ((event_list.events[1].time - observation_time) / member_ephem.duration).to(
                         u.dimensionless_unscaled
                     )
-                    system_eclipses[system].append(f"{system}{ephem_row["Member"]}: {duration_percent:.2f}")
+                    system_eclipses[system].append(f'{system}{ephem_row["Member"]}: {duration_percent:.2f}')
 
                     eclipse_found = True
                     eclipse_observations.loc[len(eclipse_observations)] = [

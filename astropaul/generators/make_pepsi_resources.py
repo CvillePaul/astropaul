@@ -13,7 +13,8 @@ def make_pepsi_resources(fits_dir: Path, resources_dir: Path):
         **{file.name: file for file in fits_dir.glob("20*/*.bwl")},
         **{file.name: file for file in fits_dir.glob("20*/*.nor")},
     }
-
+    print(f"Generating resources for {len(fits_files)} files")
+    
     spectrum_resource_name = "PEPSI Spectrum"
     spectrum_sql_name = string_to_db_style(spectrum_resource_name)
     spectrum_dir = Path(spectrum_resource_name)
@@ -33,7 +34,7 @@ def make_pepsi_resources(fits_dir: Path, resources_dir: Path):
         spectrum_resources = pd.DataFrame()
         spectrum_resources["ID"] = observations["ID"]
         spectrum_resources[spectrum_sql_name] = [
-            str(spectrum_dir / f"{spectrum_resource_name}.{id.replace(":", "_")}.spec") for id in observations["ID"]
+            str(spectrum_dir / f'{spectrum_resource_name}.{id.replace(":", "_")}.spec') for id in observations["ID"]
         ]
         spectra = observations["spectrum_file"].apply(lambda file: lbt.read_pepsi_file(fits_files[file]))
         [
@@ -55,7 +56,7 @@ def make_pepsi_resources(fits_dir: Path, resources_dir: Path):
         spectrumplot_resources = pd.DataFrame()
         spectrumplot_resources["ID"] = observations["ID"]
         spectrumplot_resources[spectrumplot_sql_name] = [
-            str(spectrumplot_dir / f"{spectrumplot_resource_name}.{id.replace(":", "_")}.png") for id in observations["ID"]
+            str(spectrumplot_dir / f'{spectrumplot_resource_name}.{id.replace(":", "_")}.png') for id in observations["ID"]
         ]
         for spectrum, file in zip(spectra, spectrumplot_resources[spectrumplot_sql_name]):
             fig, ax = lbt.plot_pepsi_spectrum(spectrum)

@@ -111,7 +111,7 @@ class TargetList:
         for name, other in self.other_lists.items():
             answer += f"    {len(other):4d} rows, {len(other.columns):2d} columns: {name}\n"
         if "PEPSI exp_time" in self.target_list.columns:
-            answer += f"\nTotal PEPSI exposure time: {np.sum(self.target_list["PEPSI exp_time"])/60:.1f} minutes"
+            answer += f'\nTotal PEPSI exposure time: {np.sum(self.target_list["PEPSI exp_time"])/60:.1f} minutes'
         return answer
 
     @staticmethod
@@ -131,7 +131,7 @@ class TargetList:
         answer.list_criteria = TargetListCriteria(
             [
                 TargetListCriterion(
-                    f"Union of lists: {" and ".join([f"{tl.name}" for tl in tls])}:",
+                    f'Union of lists: {" and ".join([f"{tl.name}" for tl in tls])}:',
                     TargetListCriteria([TargetListCriterion(f"List {tl.name}:", tl.list_criteria) for tl in tls]),
                 )
             ]

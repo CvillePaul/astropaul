@@ -6,7 +6,7 @@ import os
 import re
 from sqlite3 import connect
 
-from astropaul.database import database_path
+from astropaul.database import database_connection
 from astropy.coordinates import SkyCoord
 from astropy.table import Table
 from astropy.time import Time
@@ -227,13 +227,11 @@ def parse_olist_file(file: str, known_targets: pd.DataFrame, starting_session_nu
     return observing_date, dssi_observations, observation_types, failed_lines, non_observation_lines
 
 
-def parse_olist_files(files: list[str], out_dir: str = ".", database: str = None, verbose: bool = False) -> None:
+def parse_olist_files(files: list[str], out_dir: str = ".", verbose: bool = False) -> None:
     overall_observation_types = Counter()
     overall_failed_lines = {}
     session_num = 0
-    if not database:
-        database = database_path()
-    with connect(database) as conn:
+    with database_connection() as conn:
         known_targets = pd.read_sql("select target_name, ra, dec from targets;", conn)
     for file_pattern in files:
         for specific_file in glob(file_pattern):

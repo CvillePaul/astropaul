@@ -31,7 +31,7 @@ def pepsi2html(spectrum_dirs: list[str], out_dir: str = ".", verbose: bool = Fal
                 hdul = fits.open(spectrum_file)
                 header = hdul[0].header
                 target = header["OBJECT"]
-                obstime = f"{header["DATE-OBS"]} {header["TIME-OBS"]}"
+                obstime = f'{header["DATE-OBS"]} {header["TIME-OBS"]}'
                 arm = header["ARM"]
                 cd = header["CROSDIS"]
                 exposure = header["EXPTIME"]
@@ -52,7 +52,7 @@ def pepsi2html(spectrum_dirs: list[str], out_dir: str = ".", verbose: bool = Fal
                 )
                 p.line(spectrum["Wavelength"], spectrum["Flux"], line_width=0.2)
                 p.xaxis.ticker.num_minor_ticks = 25
-                img_file = Path(out_dir) / f"{target} {arm} {obstime.replace(":", "-")}.png"
+                img_file = Path(out_dir) / f'{target} {arm} {obstime.replace(":", "-")}.png'
                 _, ax = plt.subplots(figsize=(15, 10))
                 ax.plot(spectrum["Wavelength"], spectrum["Flux"], linewidth=0.1)
                 if arm == "Blue":

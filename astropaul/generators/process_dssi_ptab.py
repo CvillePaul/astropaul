@@ -1,9 +1,8 @@
 from glob import glob
 from pathlib import Path
 import re
-from sqlite3 import Connection
 
-from astropaul.database import database_path
+from astropaul.database import database_connection
 from astropy.coordinates import SkyCoord
 from astropy.time import Time, TimeDelta
 import astropy.units as u
@@ -56,16 +55,16 @@ def process_dssi_ptab_file(
                 continue
             fields = match.groupdict()
             # use coordinates in file & coords of known targets as crosscheck of stated target id
-            ra = f"{fields["ra"][:2]}:{fields["ra"][2:4]}:{int(fields["ra"][4:5])/60:.0f}"
-            dec = f"{fields["dec"][:3]}:{fields["dec"][3:5]}:00"
+            ra = f'{fields["ra"][:2]}:{fields["ra"][2:4]}:{int(fields["ra"][4:5])/60:.0f}'
+            dec = f'{fields["dec"][:3]}:{fields["dec"][3:5]}:00'
             result_coord = SkyCoord(ra, dec, unit=(u.hourangle, u.deg))
             idx, sep2d, _ = result_coord.match_to_catalog_sky(target_coords, nthneighbor=1)
             if sep2d[0] > 0.5 * u.deg:
-                print(f"Skipped unmatched target: {result_coord}")
+                print(f"Skipped unmatched target in line: {line}")
                 continue  # skip unknown targets
             nearest_known_target_name = target_names[idx]
             if "target_id" in fields and not fields["target_id"] in nearest_known_target_name: # comparing this way avoids assuming all targets are TICs
-                raise ValueError(f"Target ID {fields["target_id"]} has coordinates closest to {nearest_known_target_name}")
+                raise ValueError(f'Target ID {fields["target_id"]} has coordinates closest to {nearest_known_target_name}')
             # replace the less precise byear with the more precise jd from the matching observation row
             byear = fields["byear"]
             result_time = Time(2000 + float(byear), format="byear")
@@ -75,7 +74,7 @@ def process_dssi_ptab_file(
             filter_criteria = np.array([filter in wavelengths for wavelengths in observation_times["wavelengths"]])
             matching_observations = observation_times[target_criteria & time_criteria & filter_criteria]
             if matching_observations.empty:
-                raise ValueError(f"No observation found for target {nearest_known_target_name} and byear {byear}")
+                raise ValueError(f"No observation found for target {nearest_known_target_name} and byear {byear} ({result_time.iso[:19]})")
             observation_time = Time(matching_observations.iloc[0][use_column], format="jd")
             remaining_wavelengths = matching_observations.iloc[0]["wavelengths"].replace(filter, "")
             observation_times.loc[matching_observations.iloc[0]["index"], "wavelengths"] = remaining_wavelengths
@@ -96,10 +95,8 @@ def process_dssi_ptab_file(
         return answer
 
 
-def process_dssi_ptab_files(files: list[str], out_dir: str = ".", database: str = None, verbose: bool = False) -> None:
-    if not database:
-        database = database_path()
-    with Connection(database) as conn:
+def process_dssi_ptab_files(files: list[str], out_dir: str = ".", verbose: bool = False) -> None:
+    with database_connection() as conn:
         targets = pd.read_sql("select * from targets where target_source like 'Kostov%';", conn)
         target_names = targets["target_name"]
         target_coords = SkyCoord(targets["ra"], targets["dec"], unit="deg")
