@@ -12,6 +12,7 @@ import dominate.util as util
 import itables
 import numpy as np
 import pandas as pd
+# from playwright.sync_api import sync_playwright
 
 from astropaul.database import html_path, resources_path
 import astropaul.priority as pr
@@ -54,6 +55,7 @@ def dataframe_to_datatable(
     table_css: str = None,
 ):
     default_options = {
+        "allow_html": True,
         "connected": True,
         "paging": False,
         "maxBytes": 0,
@@ -115,7 +117,7 @@ def keybinding_script():
 
 def standard_footer():
     return tags.p(
-        f"Created {datetime.now().astimezone().isoformat(sep=" ", timespec="seconds")} on {platform.node()}",
+        f'Created {datetime.now().astimezone().isoformat(sep=" ", timespec="seconds")} on {platform.node()}',
         style="text-align: left; font-style: italic;",
     )
 
@@ -181,7 +183,7 @@ def make_summary_page(tl: tlc.TargetList, pl: pr.PriorityList, other_files: dict
 
         if "PEPSI exp_time" in tl.target_list.columns:
             d += tags.br()
-            d += tags.h2(f"\nTotal PEPSI exposure time: {np.sum(tl.target_list["PEPSI exp_time"])/60:.1f} minutes")
+            d += tags.h2(f'\nTotal PEPSI exposure time: {np.sum(tl.target_list["PEPSI exp_time"])/60:.1f} minutes')
 
         # output information about other files
         if other_files:
@@ -210,7 +212,7 @@ def make_summary_page(tl: tlc.TargetList, pl: pr.PriorityList, other_files: dict
                     tags.th("Priorities"),
                 ]
                 for label in pl.category_labels[::-1]:
-                    columns.append(tags.th(f"Category: {label if label else "(None)"}"))
+                    columns.append(tags.th(f'Category: {label if label else "(None)"}'))
                 tags.tr(*columns)
                 first_iteration = True
                 for subsegments, illumination, members in zip(pl.segments, pl.moon_illumination, pl.segment_category_members):
@@ -364,11 +366,11 @@ def make_numerical_scores_pages(
                 "Dec DMS",
                 "Vmag",
                 "Teff",
-                "Num Ephemerides",
-                # "Num DSSI Observations",
-                # "Num Speckle Detections",
-                "Num PEPSI Observations",
             ]
+            for table_name in ["Ephemerides", "DSSI Observations", "Speckle Detections", "PEPSI Observations"]:
+                if table_name in tl.other_lists:
+                    target_columns += [f"Num {table_name}"]
+            
             pt = tl.target_list[["Target Name"] + target_columns].merge(
                 pt, left_on="Target Name", right_index=True, how="right"
             )
@@ -461,7 +463,8 @@ def make_numerical_scores_pages(
                 }
                 with dominate.document(title=title) as d:
                     d += tags.h1(
-                        tags.a(target, href=f"../../targets/targets/{target}.html", id="targets"),
+                        tags.a(target, href=f"../targets/{target}.html", id="targets"),
+                        # tags.a(target, href=f"../../targets/targets/{target}.html", id="targets"),
                         tags.span(style="display: inline-block; width: 10px;"),
                         f"Target Scores for {start_utc} UTC",
                         style="text-align: center",
@@ -537,12 +540,12 @@ def make_categorical_scores(tl: tlc.TargetList, pl: pr.PriorityList, other_files
                 segment_targets[segment_targets["Target Name"] == col]["Dec DMS"].values[0][:9] for col in ct.columns
             ]
             ct.loc["Vmag"] = [
-                f"{segment_targets[segment_targets["Target Name"] == col]["Vmag"].values[0]:.1f}" for col in ct.columns
+                f'{segment_targets[segment_targets["Target Name"] == col]["Vmag"].values[0]:.1f}' for col in ct.columns
             ]
             num_added_rows = 3
             if "PEPSI exp_time" in segment_targets.columns:
                 ct.loc["Teff"] = [
-                    f"{segment_targets[segment_targets["Target Name"] == col]["Teff"].values[0]:.0f}" for col in ct.columns
+                    f'{segment_targets[segment_targets["Target Name"] == col]["Teff"].values[0]:.0f}' for col in ct.columns
                 ]
                 num_added_rows += 1
             if "RV Standard" in segment_targets.columns:
@@ -645,7 +648,7 @@ def make_target_pages(tl: tlc.TargetList, pl: pr.PriorityList, other_files: dict
                 for plot_resource in table[column_name]:
                     shutil.copy(resources_dir / plot_resource, spectra_dir)
                 table["Plot"] = [
-                    f'<a href="file:///C:{spectra_dir / Path(file).name}" target="_blank">Plot</a>'
+                    f'<a href="file://{spectra_dir / Path(file).name}" target="_blank">Plot</a>'
                     for file in table[column_name]
                 ]
                 # observations.drop(column_name, axis=1, inplace=True)                    
@@ -689,7 +692,7 @@ def make_target_pages(tl: tlc.TargetList, pl: pr.PriorityList, other_files: dict
                     if column_name in other_table.columns:
                         other_table.drop(column_name, axis=1, inplace=True)
                 if other_table.index.name == "Target Name":
-                    if target_name in ot.index:
+                    if target_name in other_table.index:
                         entries = other_table.loc[[target_name]].reset_index(drop=True)
                     else:
                         entries = pd.DataFrame()
@@ -759,5 +762,37 @@ def render_observing_pages(tl: tlc.TargetList, pl: pr.PriorityList, other_files:
     make_target_list(tl, pl, other_files, dir)
     make_numerical_scores_pages(tl, pl, other_files, dir)
     make_categorical_scores(tl, pl, other_files, dir)
-    if subdir == "targets":
-        make_target_pages(tl, pl, other_files, dir)
+    # if subdir == "targets":
+    make_target_pages(tl, pl, other_files, dir)
+
+
+def html_to_pdf(input_html_path, output_pdf_path):
+    with open(input_html_path, "r") as f:
+        html_content = f.read()
+    beg = html_content.find("<head>")
+    end = html_content.find("</head>")
+    if beg > 0 and end > 0 and end > beg:
+        html_content = html_content[0:beg] + html_content[end + 7 :]
+    # with sync_playwright() as p:
+    #     browser = p.chromium.launch()
+    #     page = browser.new_page()
+    #     # Letter size in pixels at 96 DPI: 8.5 x 11 inches → 816 x 1056
+    #     page.set_viewport_size({"width": 816, "height": 1056})
+    #     page.set_content(html_content)
+    #     page.evaluate(
+    #         """
+    #         const table = document.querySelector('table.dataTable'); 
+    #         if (table) {
+    #             table.style.fontSize = 'small';
+    #         }
+    #     """
+    #     )
+    #     page.pdf(
+    #         path=output_pdf_path,
+    #         scale=0.8,
+    #         format="Letter",
+    #         margin={"left": "0.4 in"},
+    #         landscape=True,
+    #         print_background=True,
+    #     )
+    #     browser.close()
