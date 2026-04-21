@@ -6,7 +6,7 @@ import sys
 from astropy.io import fits
 from astropy.table import Table
 
-spectrum_extensions = [".nor", ".bwl"]
+spectrum_extensions = [".nor", ".bwl", ".avr"]
 
 header_items = {
     "DATE-OBS": ("Date UTC", str),
@@ -33,6 +33,8 @@ def make_pepsi_inventory(spectrum_dirs: list[str], out_dir: str = ".", verbose: 
     for spectrum_dir_pattern in spectrum_dirs:
         fixed_dir_pattern = spectrum_dir_pattern.replace('"', '') # powershell does crappy things w/ trailing backslashes
         for spectrum_dir in glob(fixed_dir_pattern):
+            if verbose:
+                print(f"Directory: {spectrum_dir}")
             pepsi_observations = Table(names=col_names, dtype=col_types)
             spectrum_files = sum(
                 [glob(os.path.join(spectrum_dir, f"pepsi*{extension}")) for extension in spectrum_extensions], []
@@ -53,7 +55,10 @@ def make_pepsi_inventory(spectrum_dirs: list[str], out_dir: str = ".", verbose: 
                 observations_file = f"PEPSI Observations {os.path.basename(spectrum_dir)}.csv"
                 pepsi_observations.write(os.path.join(out_dir, observations_file), overwrite=True)
                 if verbose:
-                    print(f"Wrote {len(pepsi_observations)} observations to {observations_file}")
+                    print(f"  Wrote {len(pepsi_observations)} observations to {observations_file}")
+            else:
+                if verbose:
+                    print("  No observations found")
 
 
 if __name__ == "__main__":
