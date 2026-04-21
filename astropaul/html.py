@@ -60,8 +60,9 @@ def dataframe_to_datatable(
         "paging": False,
         "maxBytes": 0,
         "maxColumns": 0,
-        "autoWidth": True,
-        "style": "width: auto; float: left; caption-side:bottom;",
+        # "autoWidth": True,
+        "style": "width: auto; caption-side:bottom;",
+        # "style": "width: auto; float: left; caption-side:bottom;",
         "layout": {"topStart": None, "topEnd": None, "bottomStart": None, "bottomEnd": None},
         "classes": "compact cell-border hover",
     }
@@ -313,7 +314,7 @@ def make_target_list(tl: tlc.TargetList, pl: pr.PriorityList, other_files: dict[
                             ],
                         },
                     },
-                    "autoWidth": False,
+                    # "autoWidth": False,
                 },
                 column_defs=column_defs,
             )
@@ -399,7 +400,6 @@ def make_numerical_scores_pages(
             with dominate.document(title=title) as d:
                 d += tags.h1(title, style="text-align: center")
                 table_options = {
-                    "sort": True,
                     "layout": {
                         "topStart": {
                             "buttons": buttons,
@@ -591,12 +591,12 @@ def make_target_pages(tl: tlc.TargetList, pl: pr.PriorityList, other_files: dict
     columns_to_skip = {}
     # do special things if certain resources are present
     pepsi_table = "PEPSI Observations"
-    if pepsi_table in tl.other_lists:
+    cd_stats = collections.defaultdict(set)
+    if pepsi_table in tl.other_lists and "PEPSI SpectrumPlot" in tl.other_lists[pepsi_table].columns:
         pepsi_observations = tl.other_lists[pepsi_table]
         columns_to_skip[pepsi_table] = ["PEPSI SpectrumPlot"]
         spectra_dir = Path(dir) / "spectrum_plots"
         spectra_dir.mkdir(exist_ok=True)
-        cd_stats = collections.defaultdict(set)
         for (target_name, cd), rows in pepsi_observations.sort_values("Mid JD").groupby(["Target Name", "Cross Disperser"]):
             name = f"{pepsi_table} for {target_name}"
             with dominate.document(name=name) as d:
@@ -607,7 +607,7 @@ def make_target_pages(tl: tlc.TargetList, pl: pr.PriorityList, other_files: dict
                 # d.head += tags.script(src="https://unpkg.com/flickity-fullscreen@2/fullscreen.js")
                 carousel = tags.div(cls="carousel")
                 for _, row in rows.iterrows():
-                    cell = tags.div(cls="flikity-cell") 
+                    cell = tags.div(cls="flikity-cell")
                     cell += tags.img(src=Path(row["PEPSI SpectrumPlot"]).name)
                     carousel += cell
                 d += carousel
@@ -641,7 +641,7 @@ def make_target_pages(tl: tlc.TargetList, pl: pr.PriorityList, other_files: dict
     resources_dir = resources_path()
     spectroscopy_observations = [("PEPSI Observations", "PEPSI SpectrumPlot")] # (table, plot column name)
     for table_name, column_name in spectroscopy_observations:
-        if table_name in other_tables:
+        if table_name in other_tables and column_name in other_tables[table_name].columns:
             # add the link in the table
             table = other_tables[table_name]
             if not "Plot" in table.columns:
@@ -651,7 +651,7 @@ def make_target_pages(tl: tlc.TargetList, pl: pr.PriorityList, other_files: dict
                     f'<a href="file://{spectra_dir / Path(file).name}" target="_blank">Plot</a>'
                     for file in table[column_name]
                 ]
-                # observations.drop(column_name, axis=1, inplace=True)                    
+                # observations.drop(column_name, axis=1, inplace=True)
 
     # make pages for each individual target
     Path(dir / "targets").mkdir(exist_ok=True)
@@ -706,8 +706,8 @@ def make_target_pages(tl: tlc.TargetList, pl: pr.PriorityList, other_files: dict
                             d += tags.a(f"CD{cd} Plots",href=f"../{spectra_dir.name}/{target_name} - CD{cd}.html", target="_blank")
                             d += tags.br()
                     table_options = {
-                        "autowidth": False,
-                        "float": "left",
+                        # "autowidth": False,
+                        # "float": "left",
                         "layout": {
                             "topEnd": None,
                             "bottomStart": {
@@ -766,33 +766,33 @@ def render_observing_pages(tl: tlc.TargetList, pl: pr.PriorityList, other_files:
     make_target_pages(tl, pl, other_files, dir)
 
 
-def html_to_pdf(input_html_path, output_pdf_path):
-    with open(input_html_path, "r") as f:
-        html_content = f.read()
-    beg = html_content.find("<head>")
-    end = html_content.find("</head>")
-    if beg > 0 and end > 0 and end > beg:
-        html_content = html_content[0:beg] + html_content[end + 7 :]
-    # with sync_playwright() as p:
-    #     browser = p.chromium.launch()
-    #     page = browser.new_page()
-    #     # Letter size in pixels at 96 DPI: 8.5 x 11 inches → 816 x 1056
-    #     page.set_viewport_size({"width": 816, "height": 1056})
-    #     page.set_content(html_content)
-    #     page.evaluate(
-    #         """
-    #         const table = document.querySelector('table.dataTable'); 
-    #         if (table) {
-    #             table.style.fontSize = 'small';
-    #         }
-    #     """
-    #     )
-    #     page.pdf(
-    #         path=output_pdf_path,
-    #         scale=0.8,
-    #         format="Letter",
-    #         margin={"left": "0.4 in"},
-    #         landscape=True,
-    #         print_background=True,
-    #     )
-    #     browser.close()
+# def html_to_pdf(input_html_path, output_pdf_path):
+#     with open(input_html_path, "r") as f:
+#         html_content = f.read()
+#     beg = html_content.find("<head>")
+#     end = html_content.find("</head>")
+#     if beg > 0 and end > 0 and end > beg:
+#         html_content = html_content[0:beg] + html_content[end + 7 :]
+#     with sync_playwright() as p:
+#         browser = p.chromium.launch()
+#         page = browser.new_page()
+#         # Letter size in pixels at 96 DPI: 8.5 x 11 inches → 816 x 1056
+#         page.set_viewport_size({"width": 816, "height": 1056})
+#         page.set_content(html_content)
+#         page.evaluate(
+#             """
+#             const table = document.querySelector('table.dataTable');
+#             if (table) {
+#                 table.style.fontSize = 'small';
+#             }
+#         """
+#         )
+#         page.pdf(
+#             path=output_pdf_path,
+#             scale=0.8,
+#             format="Letter",
+#             margin={"left": "0.4 in"},
+#             landscape=True,
+#             print_background=True,
+#         )
+#         browser.close()
