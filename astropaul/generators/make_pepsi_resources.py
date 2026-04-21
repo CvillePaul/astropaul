@@ -12,6 +12,7 @@ def make_pepsi_resources(fits_dir: Path, resources_dir: Path):
     fits_files = {
         **{file.name: file for file in fits_dir.glob("20*/*.bwl")},
         **{file.name: file for file in fits_dir.glob("20*/*.nor")},
+        **{file.name: file for file in fits_dir.glob("20*/*.avr")},
     }
     print(f"Generating resources for {len(fits_files)} files")
     
