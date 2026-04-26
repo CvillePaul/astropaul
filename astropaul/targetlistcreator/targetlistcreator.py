@@ -1,12 +1,13 @@
 import collections
 import datetime
+import pickle
 from sqlite3 import Connection
 from typing import Any
 
 import numpy as np
 import pandas as pd
 
-from astropaul.database import db_style_to_string
+from astropaul.database import db_style_to_string, database_path
 
 import __main__
 
@@ -86,6 +87,10 @@ class TargetList:
         )
         return answer
 
+    def save(self, filename: str = "TargetList.tl") -> None:
+        with open(database_path().parent / filename, "wb") as f:
+            pickle.dump(self, f)
+
     def add_columns(self, columns: dict[str, Any] = {}):
         pass
 
@@ -109,9 +114,15 @@ class TargetList:
             answer += f"    {name}: ({len(primary)}, {len(secondary)})\n"
         answer += "Associated tables:\n"
         for name, other in self.other_lists.items():
-            answer += f"    {len(other):4d} rows, {len(other.columns):2d} columns: {name}\n"
+            answer += f"    {len(other):4d} rows, {len(other.columns):3d} columns: {name}\n"
         if "PEPSI exp_time" in self.target_list.columns:
             answer += f'\nTotal PEPSI exposure time: {np.sum(self.target_list["PEPSI exp_time"])/60:.1f} minutes'
+        return answer
+
+    @staticmethod
+    def load(filename: str = "TargetList.tl") -> "TargetList":
+        with open(database_path().parent / filename, "rb") as f:
+            answer = pickle.load(f)
         return answer
 
     @staticmethod
