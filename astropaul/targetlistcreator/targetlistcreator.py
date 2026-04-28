@@ -164,6 +164,8 @@ class TargetListCreator:
         Create a new target list by running through self.steps and returning the result
         """
         intermediate_tl = initial_list.copy() if initial_list else TargetList(name=name or self.name)
+        if name:
+            intermediate_tl.name = name
         merged_kwargs = {"connection": self.connection, **self.kwargs, **kwargs}
         if steps is None:
             steps = self.steps
