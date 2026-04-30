@@ -195,9 +195,14 @@ def filter_targets(
 def filter_other_list(tl: TargetList, list_name: str, criteria, inverse: bool = False, **kwargs) -> TargetList:
     verify_step_requirements(tl, {list_name})
     answer = tl.copy()
-    other_list = Table.from_pandas(tl.other_lists[list_name])
+    other_list = tl.other_lists[list_name]
     if len(other_list) == 0:
         return answer
+    mask = criteria(other_list)
+    if inverse:
+        code = "Inverse of: " + code
+        mask = ~mask
+    surviving_targets = set(other_list[mask]["Target Name"])
     code = inspect.getsource(criteria).strip()
     if (prefix := code.find("criteria=")) > 0:
         code = f"In table {list_name}: {code[prefix + 9 :-2]}"  # try to isolate the code of the lambda function passed in
@@ -210,17 +215,13 @@ def filter_other_list(tl: TargetList, list_name: str, criteria, inverse: bool = 
     # convert to astropy table, with each column containing a Quantity having its unit attribute set
     # all so the dear user can use lambdas like df["col"] > 1.2 * u.arcsec, which isn't possible on dataframes
     # NOTE: this requires all rows to have EXACTLY the same unit
+    other_list = Table.from_pandas(other_list)
     for col in other_list.columns:
         sample_val = other_list[col][0]
         if isinstance(sample_val, u.Quantity):
             unit = sample_val.unit
             other_list[col] = [val.value for val in other_list[col]]
             other_list[col].unit = unit
-    mask = criteria(other_list)
-    if inverse:
-        code = "Inverse of: " + code
-        mask = ~mask
-    surviving_targets = set(other_list[mask]["Target Name"])
     answer.target_list = answer.target_list[tl.target_list["Target Name"].isin(surviving_targets)]
     answer.list_criteria.add(code)
     return answer
