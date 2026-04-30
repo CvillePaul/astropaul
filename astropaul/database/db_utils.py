@@ -5,7 +5,6 @@ from sqlite3 import Connection
 
 
 def base_path() -> Path:
-    # TODO: change to use a relative path for portability
     return Path.home() / "Dropbox/Astro/"
 
 
