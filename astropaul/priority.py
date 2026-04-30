@@ -258,7 +258,7 @@ def calculate_eclipse_priority(
 
 def calculate_phase_priority(pl: PriorityList, phase_defs: list[ph.PhaseEventDef], phase_categories: dict[str, float]) -> None:
     ephem_table = pl.target_list.other_lists["Ephemerides"]
-    min_priority = min(phase_categories, key=operator.itemgetter(1))
+    min_priority = min(phase_categories.values())
     for target, table_list in pl.target_tables.items():
         ephem_rows = ephem_table[ephem_table["Target Name"] == target]
         ephem_rows = ephem_rows[ephem_rows["Member"] == "a"]
@@ -283,6 +283,62 @@ def calculate_phase_priority(pl: PriorityList, phase_defs: list[ph.PhaseEventDef
                 whole_state = "|".join(sorted(row[system_cols]))
                 overall_priorities.append(phase_categories[whole_state])
             table["Phase Priority"] = overall_priorities
+
+
+def calculate_pepsi_priority(pl: PriorityList, phase_defs: list[ph.PhaseEventDef]) -> None:
+    """Use the table of observation goals to calculate priority.
+    NOTE: The list of phase event definitions needs to be the same as the one used to classify the existing observations"""
+    ephem_table = pl.target_list.other_lists["Ephemerides"]
+    goals_table = pl.target_list.other_lists["PEPSI Observation Goals"]
+    # make goals into a dict[<target name>, dict[<label>, <merit>]]
+    target_goals = goals_table.set_index(["Target Name", "Label"])["Merit"].unstack(fill_value=None).to_dict("index")
+    session_beg, session_end = pl.session.time_range
+    for target_name, table_list in pl.target_tables.items():
+        ephem_rows = ephem_table[(ephem_table["Target Name"] == target_name) & (ephem_table["Member"] == "a")].sort_values("System")
+        if ephem_rows.empty or len(ephem_rows) < 2:
+            for table in table_list:
+                table["PEPSI Priority"] = 0  # flunk anything that doesn't have at least two binaries
+            continue
+        ephems = [ph.Ephemeris.from_dataframe_row(row) for _, row in ephem_rows.iterrows()]
+        event_lists = [ph.PhaseEventList.calc_phase_events(ephem, phase_defs, session_beg, session_end) for ephem in ephems]
+        for table, segments in zip(table_list, pl.segments):
+            states, goals, priorities = [], [], []
+            for segment_beg, segment_end in segments:
+                state = "|".join([event_list.calc_longest_span(segment_beg, segment_end) for event_list in event_lists])
+                states.append(state)
+                label = f"{state}_CD6"  # TODO: parametrize this or delegate to external function to build the label
+                goal = target_goals.get(target_name, {}).get(label, 0)
+                goals.append(goal)
+                priorities.append(1 if goal > 0 else 0)
+            table["Phase State"] = states
+            table["PEPSI Goal"] = goals
+            table["PEPSI Priority"] = priorities
+
+        # # for _, row in ephem_rows.iterrows():
+        # #     ephem = ph.Ephemeris.from_dataframe_row(row)
+        # #     event_list = ph.PhaseEventList.calc_phase_events(ephem, phase_defs, session_beg, session_end)
+        # #     # make columns for each system for each observing segment
+        # #     for table, segments in zip(table_list, pl.segments):
+        # #         states.append([event_list.calc_longest_span(segment_beg, segment_end) for segment_beg, segment_end in segments])
+        # # for segment_states in zip(states):
+
+        # # make the overall priority column that considers all available systems
+        # system_cols = [f"Phase System {system} State" for system in ephem_rows["System"]]
+        # for table in table_list:
+        #     overall_priorities = []
+        #     for _, row in table.iterrows():
+        #         whole_state = "|".join(sorted(row[system_cols]))
+        #         label = f"{whole_state}_CD6" # TODO: parametrize this or delegate to external function to build the label
+        #         goal = goals[(goals["Target Name"] == target_name) & (goals["Label"] == label)]
+        #         match len(goal):
+        #             case 0:
+        #                 overall_priorities.append(0)
+        #             case 1:
+        #                 desired_merit = goal.iloc[0]["Merit"]
+        #                 overall_priorities.append(1 if desired_merit > 0 else 0)
+        #             case _:
+        #                 raise ValueError("Goal table possibly has bad data")
+        #     table["PEPSI Priority"] = overall_priorities
 
 
 def prioritize_phase_sequence(
@@ -432,7 +488,7 @@ def prioritize_side_observation(pl: PriorityList, side_state: str = "Eclipse", s
 
 
 def calculate_overall_priority(pl: PriorityList) -> None:
-    for table_list in pl.target_tables.values():
+    for target_name, table_list in pl.target_tables.items():
         for table in table_list:
             priority_columns = [col for col in table.columns if col.endswith(" Priority")]
             table["Overall Priority"] = 1
