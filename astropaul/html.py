@@ -118,7 +118,7 @@ def keybinding_script():
 
 def standard_footer():
     return tags.p(
-        f'Created {datetime.now().astimezone().isoformat(sep=" ", timespec="seconds")} on {platform.node()}',
+        f'Created {datetime.now().astimezone().isoformat(sep=" ", timespec="seconds")} on {platform.node().replace(".local","")}',
         style="text-align: left; font-style: italic;",
     )
 
@@ -451,7 +451,6 @@ def make_numerical_scores_pages(
                 tt.index = [f"{time:%H:%M}" for time in tt.index]
                 title = f"{start_utc} Target Scores for {target}"
                 table_options = {
-                    "sort": False,
                     "layout": {
                         "bottomStart": {
                             "buttons": [
@@ -566,7 +565,7 @@ def make_categorical_scores(tl: tlc.TargetList, pl: pr.PriorityList, other_files
             title = f"Categorical Priorities, {start_utc} UTC"
             with dominate.document(title=title) as d:
                 d += tags.h1(title, style="text-align: center")
-                d += util.raw(dataframe_to_datatable(ct, "Categorical_Priority", table_options={"sort": False}))
+                d += util.raw(dataframe_to_datatable(ct, "Categorical_Priority"))
                 if i > 0:
                     d.head += tags.a("<-Prev", href=f"Categorical Priorities {start_times[i - 1]}.html", id="prevDay")
                 else:
