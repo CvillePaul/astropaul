@@ -4,10 +4,12 @@ import astropaul.phase as ph
 
 from .targetlistcreator import TargetList, verify_step_requirements
 
+observations_table = "PEPSI Observations"
+results_table = "PEPSI Observation Results"
+goals_table = "PEPSI Observation Goals"
 
 def pepsi_observation_classifier(
     tl: TargetList = None,
-    observation_table_name: str = None,
     phase_event_defs: list[ph.PhaseEventDef] = None,
     min_evaluation: float = 0,
     **kwargs,
@@ -15,15 +17,14 @@ def pepsi_observation_classifier(
     """Classify all PEPSI observations for each target.
     Identifier is Cross Disperser combined with a |-separated list of states for each system
     Merit is simply the Evaluation value for that observation"""
-
-    verify_step_requirements(tl, {observation_table_name, "Ephemerides"})
+    verify_step_requirements(tl, {observations_table, "Ephemerides"})
     if not phase_event_defs:
         raise ValueError("Phase Event Defs not provided")
     answer = tl.copy()
     labels = pd.DataFrame(columns=["Target Name", "Label", "Merit"])
     all_ephems = tl.other_lists["Ephemerides"]
     quads = answer.target_list[answer.target_list["Target Type"] == "QuadEB"]["Target Name"].to_list()
-    for target_name, rows in answer.other_lists[observation_table_name].groupby("Target Name"):
+    for target_name, rows in answer.other_lists[observations_table].groupby("Target Name"):
         if not target_name in quads:
             continue # only handle quads for now
         ephem_rows = all_ephems[(all_ephems["Target Name"] == target_name) & (all_ephems["Member"] == "a")].sort_values("System")
@@ -42,7 +43,7 @@ def pepsi_observation_classifier(
             if merit != merit:
                 continue
             labels.loc[len(labels)] = [target_name, label, merit]
-    answer.other_lists[f"{observation_table_name} Labels"] = labels.sort_values(["Target Name", "Label"])
+    answer.other_lists[results_table] = labels.sort_values(["Target Name", "Label"])
     return answer
 
 
@@ -57,7 +58,7 @@ def add_pepsi_goals(tl: TargetList, **kwargs) -> TargetList:
     quads = tl.target_list[tl.target_list["Target Type"] == "QuadEB"]["Target Name"].to_list()
     goals = {target_name: {label: 4 for label in labels} for target_name in quads}
     # reduce the desired merit for each observation already made
-    for target_name, rows in answer.other_lists["PEPSI Observations Labels"].groupby("Target Name"):
+    for target_name, rows in answer.other_lists[results_table].groupby("Target Name"):
         if not target_name in quads:
             continue
         target_goals = goals[target_name]
@@ -70,7 +71,7 @@ def add_pepsi_goals(tl: TargetList, **kwargs) -> TargetList:
             else:
                 target_goals[label] = current_goal - merit
     rows = [[target_name, label, merit] for target_name, target_labels in goals.items() for label, merit in target_labels.items()]
-    answer.other_lists["PEPSI Observation Goals"] = pd.DataFrame(rows, columns=["Target Name", "Label", "Merit"])
+    answer.other_lists[goals_table] = pd.DataFrame(rows, columns=["Target Name", "Label", "Merit"])
     return answer
 
 
