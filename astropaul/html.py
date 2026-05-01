@@ -18,6 +18,19 @@ from astropaul.database import html_path, resources_path
 import astropaul.priority as pr
 import astropaul.targetlistcreator.targetlistcreator as tlc
 
+lbt_timezone = "US/Mountain"
+
+def categorical_file_name(time: pd.Timestamp) -> tuple[str, str]:
+    mst_date = f'{time.tz_localize("UTC").tz_convert(lbt_timezone):%Y-%m-%d}'
+    title = f'Categorical Priorities {mst_date} MST'
+    filename= f'uva_multistar_priorities_{mst_date}_mst.html'
+    return title, filename
+
+def numerical_file_name(time: pd.Timestamp) -> tuple[str, str]:
+    date = f"{time:%Y-%m-%d}"
+    title = f"Numerical Priorities {date} UTC"
+    filename = f"{title}.html"
+    return title, filename
 
 def default_table_css(table_id: str) -> str:
     return textwrap.dedent(
@@ -237,8 +250,8 @@ def make_summary_page(tl: tlc.TargetList, pl: pr.PriorityList, other_files: dict
                         end_cell,
                         tags.td(f"{(end - beg).to(u.hour):.1f}"),
                         tags.td(f"{illumination:.2f}"),
-                        tags.td(tags.a("Numerical", href=f"Numerical Priorities {beg.iso[:10]}.html", id=numerical_id)),
-                        tags.td(tags.a("Categorical", href=f"Categorical Priorities {beg.iso[:10]}.html", id=categorical_id)),
+                        tags.td(tags.a("Numerical", href=numerical_file_name(pd.Timestamp(beg.iso))[1], id=numerical_id)),
+                        tags.td(tags.a("Categorical", href=categorical_file_name(pd.Timestamp(beg.iso))[1], id=categorical_id)),
                     ]
                     for label in pl.category_labels[::-1]:
                         label_members = members[label]
@@ -330,13 +343,14 @@ def make_numerical_scores_pages(
 ) -> None:
     # make pages for numerical priorities
     if pl and pl.numerical_priorities:
-        start_times = [f"{pt.index[0]:%Y-%m-%d}" for pt in pl.numerical_priorities]
+        start_times = [pt.index[0] for pt in pl.numerical_priorities]
         threshold = pl.category_bins[-2]
         above_threshold_style = "background-color: #EBF4FA;"
         not_observable_style = "color: #DDDDDD;"
         for i, priority_table in enumerate(pl.numerical_priorities):
             pt = priority_table.copy()
-            start_utc = start_times[i]
+            title, filename = numerical_file_name(start_times[i])
+            start_date = f"{start_times[i]:%Y-%m-%d}"
             pt.index = [f"{time:%H:%M}" for time in pt.index]
             # apply background highlighting to cells above threshold
             for col in pt.columns:
@@ -379,9 +393,9 @@ def make_numerical_scores_pages(
             first_target = pt.iloc[0]["Target Name"]
             pt["Target Name"] = [  # add target info columns to allow filtering of rows
                 (
-                    f'<div style=text-align:left><a href="target scores/Target Scores {target} {start_utc}.html", id="targets">{target}</a></div>'
+                    f'<div style=text-align:left><a href="target scores/Target Scores {target} {start_date}.html", id="targets">{target}</a></div>'
                     if target == first_target
-                    else f'<div style=text-align:left><a href="target scores/Target Scores {target} {start_utc}.html">{target}</a></div>'
+                    else f'<div style=text-align:left><a href="target scores/Target Scores {target} {start_date}.html">{target}</a></div>'
                 )
                 for target in pt["Target Name"]
             ]
@@ -396,7 +410,6 @@ def make_numerical_scores_pages(
                 }
             ]
             pt.columns = [""] + list(pt.columns[1:])
-            title = f"Numerical Priorities, {start_utc} UTC"
             with dominate.document(title=title) as d:
                 d += tags.h1(title, style="text-align: center")
                 table_options = {
@@ -426,30 +439,30 @@ def make_numerical_scores_pages(
                 d += util.raw("<style>#Numerical_Priority th {writing-mode:sideways-lr;}</style>")
 
                 if i > 0:
-                    d.head += tags.a("<-Prev", href=f"Numerical Priorities {start_times[i - 1]}.html", id="prevDay")
+                    d.head += tags.a("<-Prev", href=numerical_file_name(start_times[i - 1])[1], id="prevDay")
                 else:
                     d.head += tags.span("<-Prev")
                 d.head += horizontal_space()
                 if i < len(start_times) - 1:
-                    d.head += tags.a("Next->", href=f"Numerical Priorities {start_times[i + 1]}.html", id="nextDay")
+                    d.head += tags.a("Next->", href=numerical_file_name(start_times[i + 1])[1], id="nextDay")
                 else:
                     d.head += tags.span("Next->")
                 d.head += horizontal_space()
-                d.head += tags.a("Categorical Priorities", href=f"Categorical Priorities {start_utc}.html", id="categorical")
+                d.head += tags.a("Categorical Priorities", href=categorical_file_name(start_times[i])[1], id="categorical")
                 d.head += horizontal_space()
                 d.head += tags.a("Summary Page", href="index.html", id="summary")
                 d.head += horizontal_space()
                 d.head += tags.a("Home", href="../index.html", id="home")
                 d += tags.script(util.raw(keybinding_script()))
                 d.footer += standard_footer()
-                with open(f"{dir}/Numerical Priorities {start_utc}.html", "w") as f:
+                with open(f"{dir}/{filename}", "w") as f:
                     f.write(d.render())
 
             # now write target scores pages for each column of the numerical priorities table
             for target in all_targets:
                 tt = pl.target_tables[target][i].copy()
                 tt.index = [f"{time:%H:%M}" for time in tt.index]
-                title = f"{start_utc} Target Scores for {target}"
+                title = f"{start_date} Target Scores for {target}"
                 table_options = {
                     "layout": {
                         "bottomStart": {
@@ -465,7 +478,7 @@ def make_numerical_scores_pages(
                         tags.a(target, href=f"../targets/{target}.html", id="targets"),
                         # tags.a(target, href=f"../../targets/targets/{target}.html", id="targets"),
                         tags.span(style="display: inline-block; width: 10px;"),
-                        f"Target Scores for {start_utc} UTC",
+                        f"Target Scores for {start_date} UTC",
                         style="text-align: center",
                     )
                     d += tags.p(util.raw(dataframe_to_datatable(tt, "Target_Scores", table_options=table_options)))
@@ -485,7 +498,7 @@ def make_numerical_scores_pages(
                     else:
                         d.head += tags.a(
                             "<-Prev Target",
-                            href=f"Target Scores {all_targets[target_index - 1]} {start_utc}.html",
+                            href=f"Target Scores {all_targets[target_index - 1]} {start_date}.html",
                             id="prevTarget",
                         )
                     d.head += horizontal_space()
@@ -494,34 +507,35 @@ def make_numerical_scores_pages(
                     else:
                         d.head += tags.a(
                             "Next Target->",
-                            href=f"Target Scores {all_targets[target_index + 1]} {start_utc}.html",
+                            href=f"Target Scores {all_targets[target_index + 1]} {start_date}.html",
                             id="nextTarget",
                         )
                     d.head += horizontal_space()
-                    d.head += tags.a("Numerical Priorities", href=f"../Numerical Priorities {start_utc}.html", id="numerical")
+                    d.head += tags.a("Numerical Priorities", href=f"../{filename}", id="numerical")
                     d.head += horizontal_space()
                     d.head += tags.a(
-                        "Categorical Priorities", href=f"../Categorical Priorities {start_utc}.html", id="categorical"
+                        "Categorical Priorities", href=f"../{categorical_file_name(start_times[i])[1]}", id="categorical"
                     )
                     d.head += horizontal_space()
                     d.head += tags.a("Summary Page", href="../index.html", id="summary")
                     d.head += horizontal_space()
                     d.head += tags.a("Home", href="../../index.html", id="home")
                     d += tags.script(util.raw(keybinding_script()))
-                    with open(f"{dir}/target scores/Target Scores {target} {start_utc}.html", "w") as f:
+                    with open(f"{dir}/target scores/Target Scores {target} {start_date}.html", "w") as f:
                         f.write(d.render())
-
 
 def make_categorical_scores(tl: tlc.TargetList, pl: pr.PriorityList, other_files: dict[str, str], dir: str = "html") -> None:
     # make pages for categorical priorities
     if pl and pl.categorical_priorities:
-        start_times = [f"{pt.index[0]:%Y-%m-%d}" for pt in pl.categorical_priorities]
+        start_times = [pt.index[0] for pt in pl.categorical_priorities]
         for i, categories_table in enumerate(pl.categorical_priorities):
             ct = categories_table.copy()  # make a copy we can alter for formatting purposes
             if len(ct.columns) == 0:
                 continue  # skip cases where there were no targets passing criteria
-            start_utc = start_times[i]
-            ct.index = [f"{time:%H:%M}" for time in ct.index]
+            # start_utc = start_times[i]
+            # start_lbt = f'{ct.index[0].tz_localize("UTC").tz_convert(lbt_timezone):%Y-%m-%d}'
+            title, filename = categorical_file_name(start_times[i])
+            ct.index = [f'{time.tz_localize("UTC").tz_convert(lbt_timezone):%H:%M}' for time in ct.index]
             highlight_value = pl.category_labels[-1]
             for col in ct.columns:
                 ct[col] = [
@@ -562,27 +576,26 @@ def make_categorical_scores(tl: tlc.TargetList, pl: pr.PriorityList, other_files
             # elide the target names to first 4 digits
             ct.columns = [col[:8] + "..." for col in ct.columns]
             # generate the chart
-            title = f"Categorical Priorities, {start_utc} UTC"
             with dominate.document(title=title) as d:
                 d += tags.h1(title, style="text-align: center")
                 d += util.raw(dataframe_to_datatable(ct, "Categorical_Priority"))
                 if i > 0:
-                    d.head += tags.a("<-Prev", href=f"Categorical Priorities {start_times[i - 1]}.html", id="prevDay")
+                    d.head += tags.a("<-Prev", href=categorical_file_name(start_times[i - 1])[1], id="prevDay")
                 else:
                     d.head += tags.span("<-Prev")
                 d.head += horizontal_space()
                 if i < len(start_times) - 1:
-                    d.head += tags.a("Next->", href=f"Categorical Priorities {start_times[i + 1]}.html", id="nextDay")
+                    d.head += tags.a("Next->", href=categorical_file_name(start_times[i + 1])[1], id="nextDay")
                 else:
                     d.head += tags.span("Next->")
                 d.head += horizontal_space()
-                d.head += tags.a("Numerical Priorities", href=f"Numerical Priorities {start_utc}.html", id="numerical")
+                d.head += tags.a("Numerical Priorities", href=numerical_file_name(start_times[i])[1], id="numerical")
                 d.head += horizontal_space()
                 d.head += tags.a("Summary Page", href="index.html", id="summary")
                 d += tags.script(util.raw(keybinding_script()))
                 d.head += horizontal_space()
                 d.head += tags.a("Home", href="../index.html", id="home")
-                with open(f"{dir}/Categorical Priorities {start_utc}.html", "w") as f:
+                with open(f"{dir}/{filename}", "w") as f:
                     f.write(d.render())
 
 
@@ -763,4 +776,3 @@ def render_observing_pages(tl: tlc.TargetList, pl: pr.PriorityList, other_files:
     make_categorical_scores(tl, pl, other_files, dir)
     # if subdir == "targets":
     make_target_pages(tl, pl, other_files, dir)
-
