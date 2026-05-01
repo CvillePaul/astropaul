@@ -1,4 +1,3 @@
-import operator
 from typing import Any
 
 import astroplan as ap
