@@ -23,7 +23,7 @@ lbt_timezone = "US/Mountain"
 def categorical_file_name(time: pd.Timestamp) -> tuple[str, str]:
     mst_date = f'{time.tz_localize("UTC").tz_convert(lbt_timezone):%Y-%m-%d}'
     title = f'Categorical Priorities {mst_date} MST'
-    filename= f'uva_multistar_priorities_{mst_date}_mst.html'
+    filename= f'uva_multistar_{mst_date}_mst.html'
     return title, filename
 
 def numerical_file_name(time: pd.Timestamp) -> tuple[str, str]:
@@ -776,3 +776,35 @@ def render_observing_pages(tl: tlc.TargetList, pl: pr.PriorityList, other_files:
     make_categorical_scores(tl, pl, other_files, dir)
     # if subdir == "targets":
     make_target_pages(tl, pl, other_files, dir)
+
+
+def html_to_pdf(input_html_path, output_pdf_path):
+    with open(input_html_path, "r") as f:
+        html_content = f.read()
+    beg = html_content.find("<head>")
+    end = html_content.find("</head>")
+    if beg > 0 and end > 0 and end > beg:
+        html_content = html_content[0:beg] + html_content[end + 7 :]
+    with sync_playwright() as p:
+        browser = p.chromium.launch()
+        page = browser.new_page()
+        # Letter size in pixels at 96 DPI: 8.5 x 11 inches → 816 x 1056
+        page.set_viewport_size({"width": 816, "height": 1056})
+        page.set_content(html_content)
+        page.evaluate(
+            """
+            const table = document.querySelector('table.dataTable');
+            if (table) {
+                table.style.fontSize = 'small';
+            }
+        """
+        )
+        page.pdf(
+            path=output_pdf_path,
+            scale=0.8,
+            format="Letter",
+            margin={"left": "0.4 in"},
+            landscape=True,
+            print_background=True,
+        )
+        browser.close()
