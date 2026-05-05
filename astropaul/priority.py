@@ -291,8 +291,6 @@ def calculate_pepsi_priority(pl: PriorityList, phase_defs: list[ph.PhaseEventDef
     goals_table = pl.target_list.other_lists["PEPSI Observation Goals"]
     # make goals into a dict[<target name>, dict[<label>, <merit>]]
     target_goals = goals_table.set_index(["Target Name", "Label"])["Merit"].unstack(fill_value=None).to_dict("index")
-    results_table = pl.target_list.other_lists["PEPSI Observation Results"]
-    target_results = results_table.groupby(["Target Name", "Label"])["Merit"].agg("sum").unstack(fill_value=0).to_dict("index")
     session_beg, session_end = pl.session.time_range
     for target_name, table_list in pl.target_tables.items():
         ephem_rows = ephem_table[(ephem_table["Target Name"] == target_name) & (ephem_table["Member"] == "a")].sort_values("System")
@@ -308,14 +306,20 @@ def calculate_pepsi_priority(pl: PriorityList, phase_defs: list[ph.PhaseEventDef
                 state = "|".join([event_list.calc_longest_span(segment_beg, segment_end) for event_list in event_lists])
                 states.append(state)
                 label = f"{state}_CD6"  # TODO: parametrize this or delegate to external function to build the label
-                goal = target_goals.get(target_name, {}).get(label, 0)
-                result = target_results.get(target_name, {}).get(label, 0)
-                status.append(f"{result} of {goal}")
-                priorities.append(1 if goal > 0 else 0)
+                goal = target_goals.get(target_name, {}).get(label, float("nan"))
+                if goal != goal:
+                    status.append("No goal")
+                    priorities.append(0)
+                else:
+                    if goal == 0:
+                        status.append(f"Complete")
+                        priorities.append(0)
+                    else:
+                        status.append(f"Need {goal} more")
+                        priorities.append(1)
             table["Phase State"] = states
-            table["PEPSI Results"] = status
+            table["PEPSI Goals"] = status
             table["PEPSI Priority"] = priorities
-
 
 def prioritize_phase_sequence(
     pl: PriorityList,
