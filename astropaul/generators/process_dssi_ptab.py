@@ -29,11 +29,12 @@ def process_dssi_ptab_file(
 ) -> pd.DataFrame:
     match_column = "start_jd" # compare this column to the byear in the ptab file
     use_column = "mid_jd" # when match is found, use this column for the output file
-    observation_times = observations.copy()[["target_name", match_column, use_column, "mid_utc", "wavelengths"]]
+    observation_times = observations.copy()[["ID", "target_name", match_column, use_column, "mid_utc", "wavelengths"]]
     observation_times.reset_index(inplace=True)
     match_threshold = TimeDelta(61 * u.min) # byear with 4 decimals should be 52 min, but needed 61 to get all lines to match
     answer = pd.DataFrame(
         columns=[
+            "DSSI Observation ID",
             "Target Name",
             "Mid JD",
             "Mid UTC",
@@ -74,12 +75,17 @@ def process_dssi_ptab_file(
             filter_criteria = np.array([filter in wavelengths for wavelengths in observation_times["wavelengths"]])
             matching_observations = observation_times[target_criteria & time_criteria & filter_criteria]
             if matching_observations.empty:
-                raise ValueError(f"No observation found for target {nearest_known_target_name} and byear {byear} ({result_time.iso[:19]})")
-            observation_time = Time(matching_observations.iloc[0][use_column], format="jd")
-            remaining_wavelengths = matching_observations.iloc[0]["wavelengths"].replace(filter, "")
-            observation_times.loc[matching_observations.iloc[0]["index"], "wavelengths"] = remaining_wavelengths
+                error = f"No observation found for target {nearest_known_target_name} and byear {byear} ({result_time.iso[:19]})"
+                # raise ValueError(error)
+                print(f"ERROR: {error}")
+                continue
+            matching_observation = matching_observations.iloc[0] # pick first match as the best one if there are multiple matches
+            observation_time = Time(matching_observation[use_column], format="jd")
+            remaining_wavelengths = matching_observation["wavelengths"].replace(filter, "")
+            observation_times.loc[matching_observation["index"], "wavelengths"] = remaining_wavelengths
             # write out results
             answer.loc[len(answer)] = [
+                matching_observation["ID"],
                 nearest_known_target_name,
                 observation_time.jd,
                 observation_time.iso[:19],
