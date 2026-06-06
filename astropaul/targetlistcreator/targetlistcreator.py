@@ -87,8 +87,9 @@ class TargetList:
         )
         return answer
 
-    def save(self, filename: str = "TargetList.tl") -> None:
-        with open(database_path().parent / filename, "wb") as f:
+    def save(self) -> None:
+        now = datetime.datetime.now()
+        with open(database_path().parent / f'TargetList_{now.strftime("%Y-%m-%d_%Hh%Mm%Ss")}.tl', "wb") as f:
             pickle.dump(self, f)
 
     def add_columns(self, columns: dict[str, Any] = {}):
@@ -104,7 +105,7 @@ class TargetList:
             for line in str(self.list_criteria).split("\n"):
                 answer += f"  {line}\n"
         else:
-            answer += "    (none)\n"
+            answer += "  (none)\n"
         target_types = collections.Counter(self.target_list["Target Type"])
         answer += f"{len(self.target_list)} targets:\n"
         for type, count in target_types.items():
@@ -120,9 +121,12 @@ class TargetList:
         return answer
 
     @staticmethod
-    def load(filename: str = "TargetList.tl") -> "TargetList":
-        with open(database_path().parent / filename, "rb") as f:
+    def load(filename: str = None) -> "TargetList":
+        path = database_path().parent
+        filename = filename or sorted(path.glob("TargetList_*.tl"), reverse=True)[0]
+        with open(path / filename, "rb") as f:
             answer = pickle.load(f)
+        answer.list_criteria = TargetListCriteria([TargetListCriterion(f"Target list loaded from file: {filename.name} ({len(answer.target_list)} targets)")])
         return answer
 
     @staticmethod
