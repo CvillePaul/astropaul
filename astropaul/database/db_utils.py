@@ -5,19 +5,19 @@ from sqlite3 import Connection
 
 
 def base_path() -> Path:
-    return Path.home() / "Dropbox/Astro/"
+    return Path.home() / "Dropbox" / "Astro"
 
 
 def database_path() -> Path:
-    return base_path() / "Data/astropaul.db"
+    return base_path() / "Data" / "astropaul.db"
 
 
 def resources_path() -> Path:
-    return base_path() / "Resources/"
+    return base_path() / "Resources"
 
 
 def html_path() -> Path:
-    return base_path() / "Observing Files/"
+    return base_path() / "Observing Files"
 
 
 @contextmanager
