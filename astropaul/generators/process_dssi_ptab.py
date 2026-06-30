@@ -25,7 +25,7 @@ ptab_data_line = r"""(?x)
 
 
 def process_dssi_ptab_file(
-    filename: str, target_names: list[str], target_coords: SkyCoord, observations: pd.DataFrame
+    filename: Path, target_names: list[str], target_coords: SkyCoord, observations: pd.DataFrame
 ) -> pd.DataFrame:
     match_column = "start_jd" # compare this column to the byear in the ptab file
     use_column = "mid_jd" # when match is found, use this column for the output file
@@ -34,7 +34,8 @@ def process_dssi_ptab_file(
     match_threshold = TimeDelta(61 * u.min) # byear with 4 decimals should be 52 min, but needed 61 to get all lines to match
     answer = pd.DataFrame(
         columns=[
-            "DSSI Observation ID",
+            "Observation ID",
+            "Instrument",
             "Target Name",
             "Mid JD",
             "Mid UTC",
@@ -56,7 +57,7 @@ def process_dssi_ptab_file(
                 continue
             fields = match.groupdict()
             # use coordinates in file & coords of known targets as crosscheck of stated target id
-            ra = f'{fields["ra"][:2]}:{fields["ra"][2:4]}:{int(fields["ra"][4:5])/60:.0f}'
+            ra = f'{fields["ra"][:2]}:{fields["ra"][2:4]}:{int(fields["ra"][4:5])*6:02d}'
             dec = f'{fields["dec"][:3]}:{fields["dec"][3:5]}:00'
             result_coord = SkyCoord(ra, dec, unit=(u.hourangle, u.deg))
             idx, sep2d, _ = result_coord.match_to_catalog_sky(target_coords, nthneighbor=1)
@@ -86,6 +87,7 @@ def process_dssi_ptab_file(
             # write out results
             answer.loc[len(answer)] = [
                 matching_observation["ID"],
+                "DSSI",
                 nearest_known_target_name,
                 observation_time.jd,
                 observation_time.iso[:19],
@@ -101,19 +103,17 @@ def process_dssi_ptab_file(
         return answer
 
 
-def process_dssi_ptab_files(files: list[str], out_dir: str = ".", verbose: bool = False) -> None:
+def process_dssi_ptab_files(files: list[Path], out_dir: Path, verbose: bool = False) -> None:
     with database_connection() as conn:
-        targets = pd.read_sql("select * from targets where target_source like 'Kostov%';", conn)
+        targets = pd.read_sql("select * from targets;", conn)
         target_names = targets["target_name"]
         target_coords = SkyCoord(targets["ra"], targets["dec"], unit="deg")
         observations = pd.read_sql("select * from dssi_observations;", conn)
-    out_path = Path(out_dir)
-    for file_pattern in files:
-        for specific_file in glob(file_pattern):
-            print(f"Processing {specific_file}")
-            dssi_results = process_dssi_ptab_file(specific_file, target_names, target_coords, observations)
-            dssi_results = dssi_results.sort_values(["Target Name", "Mid UTC"])
-            out_file = out_path / Path(specific_file).name.replace(".ptab", ".csv")
-            dssi_results.to_csv(out_file, index=False)
-            if verbose:
-                print(f"Wrote {len(dssi_results)} result lines to {out_file}")
+    for file in files:
+        print(f"Processing {file}")
+        dssi_results = process_dssi_ptab_file(file, target_names, target_coords, observations)
+        dssi_results = dssi_results.sort_values(["Target Name", "Mid UTC"])
+        out_file = out_dir / file.name.replace(".ptab", ".csv")
+        dssi_results.to_csv(out_file, index=False)
+        if verbose:
+            print(f"Wrote {len(dssi_results)} result lines to {out_file}")
