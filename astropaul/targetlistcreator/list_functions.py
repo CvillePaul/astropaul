@@ -490,7 +490,7 @@ def add_tess_catalog_associations(tl: TargetList, **kwargs) -> TargetList:
     catalog_members = pd.read_sql("select target_name, catalog_name, catalog_id from catalog_members;", conn)
     tess_catalog_ids = pd.read_sql(
         """
-        select cm.target_name, tt.gaia 'GAIA DR2', hip, twomass
+        select cm.target_name, tt.gaia 'Gaia DR2', hip, twomass
         from catalog_members cm
         join tess_ticv8 tt on tt.tic = cm.catalog_id
         where cm.catalog_name = 'TESS TICv8';
