@@ -5,12 +5,15 @@ import sys
 
 from astroquery.gaia import Gaia
 from astropy.table import Column
+import astropy.units as u
 import pandas as pd
 
 from astropaul.database import database_connection, database_path
 
-def load_gaia_data(out_dir: Path = None, verbose: bool = True) -> None:
-    """Make a csv of Gaia DR3 data for all possible entries in the TESS database table."""
+def load_gaia_data(out_dir: Path = None, max_distance: u.Quantity = 2 * u.arcsec, max_mag_diff: float = .5, verbose: bool = True) -> None:
+    """Make a csv of Gaia DR3 data for all possible entries in the TESS database table.
+    Filter out bad matches between TESS Gaia DR2 ids and Gaia DR3 ids with distance and magnitude difference cuts.
+    """
 
     out_dir = out_dir or database_path().parent
 
@@ -38,15 +41,22 @@ def load_gaia_data(out_dir: Path = None, verbose: bool = True) -> None:
     except Exception as e:
         print(e)
 
+    # apply cuts to weed out bad matches
+    results = results[results["angular_distance"] <= max_distance.to(u.mas).value]
+    results = results[results["magnitude_difference"] <= max_mag_diff]
+
+    # add target name as first column
     results.add_column(Column([dr2_to_target_name[dr2] for dr2 in results["dr2_source_id"]], name="Target Name"), index=0)
+    # write out DR3 data
     out_file = out_dir / "Gaia DR3" / "Gaia DR3.csv"
     results.write(out_file, overwrite=True)
 
+    # write out target name to DR3 source id mapping
     out_file = out_dir / "Catalog Members" / "Gaia DR3.csv"
     members = pd.DataFrame()
-    members["Target Name"] = dr2_to_target_name.values()
+    members["Target Name"] = results["Target Name"]
     members["Catalog Name"] = "Gaia DR3"
-    members["Catalog ID"] = dr2_to_target_name.keys()
+    members["Catalog ID"] = results["source_id"]
     members.to_csv(out_file, index=False)
 
     if verbose:
@@ -57,7 +67,6 @@ if __name__ == "__main__":
         prog=os.path.basename(sys.argv[0]),
         description="Download Gaia DR3 catalog data for every target with a TESS TICv8 catalog entry.",
     )
-    parser.add_argument("-d", "--database", required=True, help="Database file to use as input")
     parser.add_argument("-o", "--out_dir", required=True, help="Directory to put resulting CSV file")
     parser.add_argument("-v", "--verbose", action="store_true", help="Output stats about file processing")
     args = parser.parse_args()
