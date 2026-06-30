@@ -10,8 +10,11 @@ import pandas as pd
 # 2025A: GN-2025A-Q-307 and GS-2025A-Q-305
 # 2025B: proposal not approved (DARP rules)
 # 2026A: only GS-2026A-Q-307 (no observations from Gemini North)
+# 2026B: GN-2026B-Q-308 and GS-2026B-Q-308
 
-def process_gemini_observations(observations_json: str) -> pd.DataFrame:
+def process_gemini_observation_file(observation_file: Path, output_dir: Path, verbose: bool = False) -> pd.DataFrame:
+    with open(observation_file, "r") as f:
+        observations_json = f.read()
     sequences = pd.read_json(StringIO(observations_json))
     columns_to_keep = [
         "telescope",
@@ -29,13 +32,7 @@ def process_gemini_observations(observations_json: str) -> pd.DataFrame:
     # observations = observations[observations["object"].str.startswith("TIC")]
     # sorted(observations["ut_date"].unique())
     observations.columns = ["Telescope", "Instrument", "Target Name", "Date UTC"]
-    return observations
-
-def process_all_gemini_observations(input_dir: str, output_dir: str) -> None:
-    for file in Path(input_dir).glob("*.json"):
-        with open(file, "r") as f:
-            contents = f.read()
-        observations = process_gemini_observations(contents)
-        outfile = Path(output_dir) / f"{file.name}.csv"
-        observations.to_csv(outfile, index=False)
-        print(f"Wrote {outfile}")
+    csv_file = output_dir / f'{observation_file.name.replace(".json", ".csv")}'
+    observations.to_csv(csv_file, index=False)
+    if verbose:
+        print(f"Wrote {len(observations)} lines to {csv_file}")
