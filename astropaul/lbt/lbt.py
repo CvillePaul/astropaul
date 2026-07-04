@@ -137,6 +137,7 @@ def write_lbt_readme_file(header: str, footer: str, targets: pd.DataFrame, sessi
     table, short_cols = make_lbt_readme_table(targets, session.starting_lst - 60)
     table = table.sort_values(["Notes", "Target Name"])
     table.columns = short_cols
+    # justify some columns so the readme file looks nice
     ljust_cols = ["Target Name", "Priority", "Notes"]
     table[ljust_cols] = table[ljust_cols].apply(lambda s: (s := s.astype(str).str.strip()).str.ljust(s.str.len().max()))
     table["RA"] = [f" {ra} " for ra in table["RA"]]
@@ -144,6 +145,8 @@ def write_lbt_readme_file(header: str, footer: str, targets: pd.DataFrame, sessi
     output = header
     output += table.to_string(index=False, justify="center")
     output += footer
+    # undo the justification so the csv file doesn't contain anomalous spaces
+    table = table.apply(lambda s: (s := s.astype(str).str.strip()))
     return table, output
 
 
