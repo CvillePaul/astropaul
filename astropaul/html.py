@@ -18,12 +18,15 @@ from astropaul.database import html_path, resources_path
 import astropaul.priority as pr
 import astropaul.targetlistcreator.targetlistcreator as tlc
 
-lbt_timezone = "US/Mountain"
+lbt_timezone = "UTC"
+lbt_zonename = "UTC"
+# lbt_timezone = "US/Mountain"
+# lbt_zonename = "MST"
 
 def categorical_file_name(time: pd.Timestamp) -> tuple[str, str]:
-    mst_date = f'{time.tz_localize("UTC").tz_convert(lbt_timezone):%Y-%m-%d}'
-    title = f'Categorical Priorities {mst_date} MST'
-    filename= f'UVa_Multistar_{mst_date}_mst.html'
+    lbt_date = f'{time.tz_localize("UTC").tz_convert(lbt_timezone):%Y-%m-%d}'
+    title = f'Categorical Priorities {lbt_date} {lbt_zonename}'
+    filename= f'UVa_Multistar_{lbt_date}_{lbt_zonename.lower()}.html'
     return title, filename
 
 def numerical_file_name(time: pd.Timestamp) -> tuple[str, str]:
@@ -73,9 +76,7 @@ def dataframe_to_datatable(
         "paging": False,
         "maxBytes": 0,
         "maxColumns": 0,
-        # "autoWidth": True,
         "style": "width: auto; caption-side:bottom;",
-        # "style": "width: auto; float: left; caption-side:bottom;",
         "layout": {"topStart": None, "topEnd": None, "bottomStart": None, "bottomEnd": None},
         "classes": "compact cell-border hover",
     }
