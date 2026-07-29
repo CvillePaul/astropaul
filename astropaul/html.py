@@ -26,7 +26,7 @@ lbt_zonename = "UTC"
 def categorical_file_name(time: pd.Timestamp) -> tuple[str, str]:
     lbt_date = f'{time.tz_localize("UTC").tz_convert(lbt_timezone):%Y-%m-%d}'
     title = f'Categorical Priorities {lbt_date} {lbt_zonename}'
-    filename= f'UVa_Multistar_{lbt_date}_{lbt_zonename.lower()}.html'
+    filename= f'UVa_Multistar_{lbt_date}_{lbt_zonename}.html'
     return title, filename
 
 def numerical_file_name(time: pd.Timestamp) -> tuple[str, str]:
