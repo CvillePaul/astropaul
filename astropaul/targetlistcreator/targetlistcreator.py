@@ -89,7 +89,7 @@ class TargetList:
 
     def save(self) -> None:
         now = datetime.datetime.now()
-        with open(database_path().parent / f'TargetList_{now.strftime("%Y-%m-%d_%Hh%Mm%Ss")}.tl', "wb") as f:
+        with open(TargetList._save_path() / f'TargetList_{now.strftime("%Y-%m-%d_%Hh%Mm%Ss")}.tl', "wb") as f:
             pickle.dump(self, f)
 
     def add_columns(self, columns: dict[str, Any] = {}):
@@ -121,8 +121,12 @@ class TargetList:
         return answer
 
     @staticmethod
+    def _save_path() -> str:
+        return database_path().parent / "Saved TargetList"
+
+    @staticmethod
     def load(filename: str = None) -> "TargetList":
-        path = database_path().parent
+        path = TargetList._save_path()
         filename = filename or sorted(path.glob("TargetList_*.tl"), reverse=True)[0]
         with open(path / filename, "rb") as f:
             answer = pickle.load(f)
