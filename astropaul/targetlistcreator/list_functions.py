@@ -2,7 +2,7 @@ import collections
 import inspect
 from functools import partial
 
-from astropy.coordinates import SkyCoord
+from astropy.coordinates import AltAz, EarthLocation, SkyCoord
 from astropy.table import Table
 from astropy.time import Time
 import astropy.units as u
@@ -469,17 +469,17 @@ def add_pepsi_evaluations(tl: TargetList, **kwargs) -> TargetList:
     return answer
 
 
-def add_tess_sectors(tl: TargetList, **kwargs) -> TargetList:
-    from astroquery.mast import Tesscut
+# def add_tess_sectors(tl: TargetList, **kwargs) -> TargetList:
+#     from astroquery.mast import Tesscut
 
-    coords = SkyCoord(ra=tl.target_list["ra"], dec=tl.target_list["dec"], unit=u.deg)
-    answer = tl.copy()
-    answer.target_list["TESS Sectors"] = [
-        ", ".join(Tesscut.get_sectors(coordinates=coord)["sector"].astype(str)) for coord in coords
-    ]
-    answer.target_list["TESS Sectors"] = [
-        ", ".join(Tesscut.get_sectors(coordinates=coord)["sector"].astype(str)) for coord in coords
-    ]
+#     coords = SkyCoord(ra=tl.target_list["ra"], dec=tl.target_list["dec"], unit=u.deg)
+#     answer = tl.copy()
+#     answer.target_list["TESS Sectors"] = [
+#         ", ".join(Tesscut.get_sectors(coordinates=coord)["sector"].astype(str)) for coord in coords
+#     ]
+#     answer.target_list["TESS Sectors"] = [
+#         ", ".join(Tesscut.get_sectors(coordinates=coord)["sector"].astype(str)) for coord in coords
+#     ]
 
 
 def add_tess_catalog_associations(tl: TargetList, **kwargs) -> TargetList:
@@ -546,4 +546,37 @@ def add_resource(tl: TargetList, resource: str, table_name: str, **kwargs) -> Ta
     resources = pd.read_sql(f"select * from resource_{string_to_db_style(resource)};", conn)
     convert_columns_to_human_style(resources)
     answer.other_lists[table_name] = answer.other_lists[table_name].merge(resources, on="ID", how="left")
+    return answer
+
+def add_zenith_distance(tl: TargetList, table_name: str, **kwargs) -> TargetList:
+    """Add a Zenith Distance column to a table
+    Table must have Target Name, Observatory and Mid JD columns to provide target coordinates, observation location & time"""
+    verify_step_requirements(tl, {table_name})
+    answer = tl.copy()
+    table = tl.other_lists[table_name]
+    targets_coords = {
+        target_name: SkyCoord(ra, dec, unit=u.deg)
+        for _, (target_name, ra, dec) in tl.target_list[["Target Name", "RA", "Dec"]].iterrows()
+    }
+    observatory_locations = {}
+    zenith_distances = []
+    for _, (target_name, observatory, mid_jd) in table[["Target Name", "Observatory", "Mid JD"]].iterrows():
+        if not (target_coords := targets_coords.get(target_name, None)):
+            raise ValueError(f"Target {target_name} not in TargetList")
+        if observatory in observatory_locations:
+            earth_location = observatory_locations[observatory]
+        else:
+            try:
+                earth_location = EarthLocation.of_site(observatory)
+            except:
+                print(f"Unknown observatory {observatory}")
+                zenith_distances.append(float("nan"))
+                continue
+            observatory_locations[observatory] = earth_location
+        time = Time(mid_jd, format="jd")
+        altaz = AltAz(location=earth_location, obstime=time)
+        altaz_coords = target_coords.transform_to(altaz)
+        zenith_distances.append((90 * u.deg - altaz_coords.alt).deg)
+    table["Zenith Distance"] = zenith_distances
+    answer.other_lists[table_name] = table
     return answer
