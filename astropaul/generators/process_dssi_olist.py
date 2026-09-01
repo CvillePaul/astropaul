@@ -97,7 +97,9 @@ observation_line_patterns = [
 ]
 
 
-def process_observation_lines(observation_lines: list[str], utc_date: datetime) -> tuple[Table, Counter, list[str]]:
+def process_observation_lines(
+    observation_lines: list[str], utc_date: datetime, observatory: str = "APO"
+) -> tuple[Table, Counter, list[str]]:
     """Extract data from observation line, return Table of observations, count of types of line, and failed lines."""
 
     dssi_sequences = pd.DataFrame()
@@ -139,23 +141,29 @@ def process_observation_lines(observation_lines: list[str], utc_date: datetime) 
             coord = SkyCoord(fields["ra"], fields["dec"], unit=(u.hourangle, u.deg))
             for image_num, wavelengths in observations:
                 try:
-                    dssi_sequences = pd.concat([
-                        dssi_sequences, 
-                        pd.DataFrame({
-                            "Target Name": [fields["target_name"].replace('"', "").strip()],
-                            "Wavelengths": [wavelengths],
-                            "Image Number": [image_num],
-                            "UTC DateTime": [datetime_utc],
-                            "Time JD": [datetime_jd],
-                            "Gain 1": [fields["gain_1"]],
-                            "Gain 2": [fields["gain_2"]],
-                            "RA": [coord.ra.value],
-                            "Dec": [coord.dec.value],
-                            "PMRA": [float(fields["pmra"])],
-                            "PMDec": [float(fields["pmdec"])],
-                            "Mag": [fields["mag"]],
-                            "Notes": [fields["notes"]],
-                        })])
+                    dssi_sequences = pd.concat(
+                        [
+                            dssi_sequences,
+                            pd.DataFrame(
+                                {
+                                    "Target Name": [fields["target_name"].replace('"', "").strip()],
+                                    "Observatory": observatory,
+                                    "Wavelengths": [wavelengths],
+                                    "Image Number": [image_num],
+                                    "UTC DateTime": [datetime_utc],
+                                    "Time JD": [datetime_jd],
+                                    "Gain 1": [fields["gain_1"]],
+                                    "Gain 2": [fields["gain_2"]],
+                                    "RA": [coord.ra.value],
+                                    "Dec": [coord.dec.value],
+                                    "PMRA": [float(fields["pmra"])],
+                                    "PMDec": [float(fields["pmdec"])],
+                                    "Mag": [fields["mag"]],
+                                    "Notes": [fields["notes"]],
+                                }
+                            ),
+                        ]
+                    )
                 except Exception as e:
                     failed_lines.append(f"{line_num:4d}: {line.strip()}")
         else:
@@ -210,10 +218,12 @@ def determine_dssi_observations(dssi_sequences: Table, starting_session_num: int
     return dssi_observations.to_pandas().sort_values("Mid JD")
 
 
-def parse_olist_file(file: str, known_targets: pd.DataFrame, starting_session_num: int) -> tuple[datetime, Table, Counter, list[str], list[str]]:
+def parse_olist_file(
+    file: str, known_targets: pd.DataFrame, starting_session_num: int, observatory: str = "APO"
+) -> tuple[datetime, Table, Counter, list[str], list[str]]:
     observing_date, contents = get_file_contents(file)
     observation_lines, non_observation_lines = find_observation_lines(contents)
-    dssi_sequences, observation_types, failed_lines = process_observation_lines(observation_lines, observing_date)
+    dssi_sequences, observation_types, failed_lines = process_observation_lines(observation_lines, observing_date, observatory)
     if not dssi_sequences.empty:
         if not known_targets.empty:
             target_coords = SkyCoord(known_targets["ra"], known_targets["dec"], unit="deg")
@@ -227,7 +237,7 @@ def parse_olist_file(file: str, known_targets: pd.DataFrame, starting_session_nu
     return observing_date, dssi_observations, observation_types, failed_lines, non_observation_lines
 
 
-def parse_olist_files(files: list[str], out_dir: str = ".", verbose: bool = False) -> None:
+def parse_olist_files(files: list[str], out_dir: str = ".", observatory: str = "APO", verbose: bool = False) -> None:
     overall_observation_types = Counter()
     overall_failed_lines = {}
     session_num = 0
@@ -235,7 +245,9 @@ def parse_olist_files(files: list[str], out_dir: str = ".", verbose: bool = Fals
         known_targets = pd.read_sql("select target_name, ra, dec from targets;", conn)
     for file_pattern in files:
         for specific_file in glob(file_pattern):
-            observation_date, dssi_observations, observation_types, failed_lines, _ = parse_olist_file(specific_file, known_targets, session_num)
+            observation_date, dssi_observations, observation_types, failed_lines, _ = parse_olist_file(
+                specific_file, known_targets, session_num, observatory
+            )
             session_num += len(dssi_observations)
             if dssi_observations.empty:
                 if verbose:
