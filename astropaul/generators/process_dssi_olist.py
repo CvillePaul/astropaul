@@ -176,6 +176,7 @@ def determine_dssi_observations(dssi_sequences: Table, starting_session_num: int
     prev_target = ""
     speckle_session = starting_session_num
     session_numbers = []
+    # the following logic makes the seemingly reasonable assumption that successive observations are done at same observatory
     for index, row in dssi_sequences.sort_values("Time JD").iterrows():
         target_name = row["Target Name"]
         if target_name != prev_target:
@@ -187,6 +188,7 @@ def determine_dssi_observations(dssi_sequences: Table, starting_session_num: int
     dssi_observations = Table(
         names=[
             "Target Name",
+            "Observatory",
             "DSSI Session",
             "Start JD",
             "Mid JD",
@@ -195,7 +197,7 @@ def determine_dssi_observations(dssi_sequences: Table, starting_session_num: int
             "Num Sequences",
             "Wavelengths",
         ],
-        dtype=[str, str, float, float, float, str, int, str],
+        dtype=[str, str, str, float, float, float, str, int, str],
     )
 
     for keys, sequences in dssi_sequences.groupby(["DSSI Session", "Target Name", "Wavelengths"]):
@@ -206,6 +208,7 @@ def determine_dssi_observations(dssi_sequences: Table, starting_session_num: int
         dssi_observations.add_row(
             (
                 keys[1],
+                sequences.iloc[0]["Observatory"],
                 str(keys[0]),
                 start_time,
                 mid_time,
