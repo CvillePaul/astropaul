@@ -23,11 +23,16 @@ lbt_zonename = "UTC"
 # lbt_timezone = "US/Mountain"
 # lbt_zonename = "MST"
 
+
+def main_target_pages_location() -> str:
+    return "../targets"
+
 def categorical_file_name(time: pd.Timestamp) -> tuple[str, str]:
     lbt_date = f'{time.tz_localize("UTC").tz_convert(lbt_timezone):%Y-%m-%d}'
-    title = f'Categorical Priorities {lbt_date} {lbt_zonename}'
-    filename= f'UVa_Multistar_{lbt_date}_{lbt_zonename}.html'
+    title = f"Categorical Priorities {lbt_date} {lbt_zonename}"
+    filename = f"UVa_Multistar_{lbt_date}_{lbt_zonename}.html"
     return title, filename
+
 
 def numerical_file_name(time: pd.Timestamp) -> tuple[str, str]:
     date = f"{time:%Y-%m-%d}"
@@ -35,9 +40,9 @@ def numerical_file_name(time: pd.Timestamp) -> tuple[str, str]:
     filename = f"{title}.html"
     return title, filename
 
+
 def default_table_css(table_id: str) -> str:
-    return textwrap.dedent(
-        f"""
+    return textwrap.dedent(f"""
         <style>
         #{table_id} th {{
             white-space: normal;
@@ -58,8 +63,7 @@ def default_table_css(table_id: str) -> str:
             font-size: 12px !important;
         }}
         </style>
-        """
-    )
+        """)
 
 
 def dataframe_to_datatable(
@@ -105,8 +109,7 @@ def horizontal_space():
 
 
 def keybinding_script():
-    return textwrap.dedent(
-        """
+    return textwrap.dedent("""
         document.addEventListener("keydown", function(event) {
             const el = event.target;
             if (
@@ -126,8 +129,7 @@ def keybinding_script():
             if (event.key === "k")          { document.getElementById("prevTarget").click(); }
             if (event.key === "h")          { document.getElementById("home").click(); }
         });
-    """
-    )
+    """)
 
 
 def standard_footer():
@@ -279,10 +281,11 @@ def make_summary_page(tl: tlc.TargetList, pl: pr.PriorityList, other_files: dict
             f.write(d.render())
 
 
-def make_target_list(tl: tlc.TargetList, pl: pr.PriorityList, other_files: dict[str, str], dir: str = "html") -> None:
+def make_target_list(tl: tlc.TargetList, pl: pr.PriorityList, other_files: dict[str, str], dir: str = "html", local_target_pages: bool = False) -> None:
     tltl = tl.target_list.copy()
+    targets_path = "targets" if local_target_pages else f"{main_target_pages_location()}/targets"
     tltl["Target Name"] = [
-        f'<a href="../targets/targets/{target_name}.html">{target_name}</a>' for target_name in tltl["Target Name"]
+        f'<a href="{targets_path}/{target_name}.html">{target_name}</a>' for target_name in tltl["Target Name"]
     ]
     title = tl.name
     with dominate.document(title=title) as d:
@@ -340,7 +343,7 @@ def make_target_list(tl: tlc.TargetList, pl: pr.PriorityList, other_files: dict[
 
 
 def make_numerical_scores_pages(
-    tl: tlc.TargetList, pl: pr.PriorityList, other_files: dict[str, str], dir: str = "html"
+    tl: tlc.TargetList, pl: pr.PriorityList, other_files: dict[str, str], dir: str = "html", local_targets_pages: bool = False
 ) -> None:
     # make pages for numerical priorities
     if pl and pl.numerical_priorities:
@@ -386,7 +389,7 @@ def make_numerical_scores_pages(
             for table_name in ["Ephemerides", "DSSI Observations", "Speckle Detections", "PEPSI Observations"]:
                 if table_name in tl.other_lists:
                     target_columns += [f"Num {table_name}"]
-            
+
             pt = tl.target_list[["Target Name"] + target_columns].merge(
                 pt, left_on="Target Name", right_index=True, how="right"
             )
@@ -433,7 +436,7 @@ def make_numerical_scores_pages(
                 column_defs = [
                     {"targets": col_indexes_to_hide, "orderable": True, "visible": False},
                     {"targets": col_indexes_to_show, "orderable": False, "visible": True},
-                    ]
+                ]
                 d += util.raw(
                     dataframe_to_datatable(pt, "Numerical_Priority", table_options=table_options, column_defs=column_defs)
                 )
@@ -475,9 +478,15 @@ def make_numerical_scores_pages(
                     },
                 }
                 with dominate.document(title=title) as d:
+                    if local_targets_pages:
+                        target_link = tags.a(target, href= f"../targets/{target}.html", id="targets")
+                    else:
+                        target_link = tags.a(
+                            target, href=f"../{main_target_pages_location()}/targets/{target}.html", id="targets"
+                        )
+
                     d += tags.h1(
-                        tags.a(target, href=f"../targets/{target}.html", id="targets"),
-                        # tags.a(target, href=f"../../targets/targets/{target}.html", id="targets"),
+                        target_link,
                         tags.span(style="display: inline-block; width: 10px;"),
                         f"Target Scores for {start_date} UTC",
                         style="text-align: center",
@@ -524,6 +533,7 @@ def make_numerical_scores_pages(
                     d += tags.script(util.raw(keybinding_script()))
                     with open(f"{dir}/target scores/Target Scores {target} {start_date}.html", "w") as f:
                         f.write(d.render())
+
 
 def make_categorical_scores(tl: tlc.TargetList, pl: pr.PriorityList, other_files: dict[str, str], dir: str = "html") -> None:
     # make pages for categorical priorities
@@ -600,7 +610,7 @@ def make_categorical_scores(tl: tlc.TargetList, pl: pr.PriorityList, other_files
                     f.write(d.render())
 
 
-def make_target_pages(tl: tlc.TargetList, pl: pr.PriorityList, other_files: dict[str, str], dir: str = "html") -> None:
+def make_target_pages(tl: tlc.TargetList, dir: str = "html", is_main: bool = False) -> None:
     columns_to_skip = {}
     # do special things if certain resources are present
     pepsi_table = "PEPSI Observations"
@@ -652,7 +662,7 @@ def make_target_pages(tl: tlc.TargetList, pl: pr.PriorityList, other_files: dict
     # if spectral observations are present, add: links to plot in table, page w/ carousel of all plots
     # TODO: this code permanently alters the observations table, it should instead modify a copy of it, leaving original intact
     resources_dir = resources_path()
-    spectroscopy_observations = [("PEPSI Observations", "PEPSI SpectrumPlot")] # (table, plot column name)
+    spectroscopy_observations = [("PEPSI Observations", "PEPSI SpectrumPlot")]  # (table, plot column name)
     for table_name, column_name in spectroscopy_observations:
         if table_name in other_tables and column_name in other_tables[table_name].columns:
             # add the link in the table
@@ -661,8 +671,7 @@ def make_target_pages(tl: tlc.TargetList, pl: pr.PriorityList, other_files: dict
                 for plot_resource in table[column_name]:
                     shutil.copy(resources_dir / plot_resource, spectra_dir)
                 table["Plot"] = [
-                    f'<a href="file://{spectra_dir / Path(file).name}" target="_blank">Plot</a>'
-                    for file in table[column_name]
+                    f'<a href="file://{spectra_dir / Path(file).name}" target="_blank">Plot</a>' for file in table[column_name]
                 ]
                 # observations.drop(column_name, axis=1, inplace=True)
 
@@ -671,7 +680,10 @@ def make_target_pages(tl: tlc.TargetList, pl: pr.PriorityList, other_files: dict
     for _, row in tl.target_list.iterrows():
         target_name = row["Target Name"]
         with dominate.document(title=target_name) as d:
-            d += tags.h1(f"{target_name} Target Details", style="text-align: center")
+            if is_main:
+                d += tags.h1(f"{target_name} Target Details", style="text-align: center")
+            else:
+                d += tags.h1(tags.div(f"{target_name} Target Info", tags.a("(Full Details)", href=f"../{main_target_pages_location()}/targets/{target_name}.html")), style="text-align: center")
             with tags.table(cellpadding=cell_padding()) as t:
                 tags.tr([tags.td("Target Type"), tags.td(row["Target Type"])])
                 tags.tr([tags.td("Target Source"), tags.td(row["Target Source"])])
@@ -687,9 +699,16 @@ def make_target_pages(tl: tlc.TargetList, pl: pr.PriorityList, other_files: dict
                     ("ExoFOP", f"https://exofop.ipac.caltech.edu/tess/target.php?id={web_target_name}"),
                     # ("Swarthmore Finder", f"https://astro.swarthmore.edu/transits/aladin.html?name={web_target_name}"),
                 ]
-                tags.tr([tags.td("External Links"), tags.td(tags.div(
-                    [[tags.a(name, href=url, target="_blank"), horizontal_space()] for name, url in external_links]
-                ))])
+                tags.tr(
+                    [
+                        tags.td("External Links"),
+                        tags.td(
+                            tags.div(
+                                [[tags.a(name, href=url, target="_blank"), horizontal_space()] for name, url in external_links]
+                            )
+                        ),
+                    ]
+                )
                 d += t
             d += tags.div(style="margin-bottom: 40px;")
             with tags.table(border=cell_border(), cellpadding=cell_padding()) as t:
@@ -716,7 +735,9 @@ def make_target_pages(tl: tlc.TargetList, pl: pr.PriorityList, other_files: dict
                     d += tags.h2(f"{table_name} ({len(entries)})")
                     if table_name == pepsi_table and target_name in cd_stats:
                         for cd in sorted(cd_stats[target_name]):
-                            d += tags.a(f"CD{cd} Plots",href=f"../{spectra_dir.name}/{target_name} - CD{cd}.html", target="_blank")
+                            d += tags.a(
+                                f"CD{cd} Plots", href=f"../{spectra_dir.name}/{target_name} - CD{cd}.html", target="_blank"
+                            )
                             d += tags.br()
                     table_options = {
                         # "autowidth": False,
@@ -764,19 +785,30 @@ def clear_directory(dir: str) -> None:
                 raise PermissionError(f"Tried {fail_count} times", e)
 
 
-def render_observing_pages(tl: tlc.TargetList, pl: pr.PriorityList, other_files: dict[str, str], subdir: str = "html") -> str:
+def render_observing_pages(
+    tl: tlc.TargetList,
+    pl: pr.PriorityList,
+    other_files: dict[str, str],
+    subdir: str = "html",
+    target_pages: str = "None", # can be Main, Local, or None
+) -> str:
     dir = html_path() / subdir
     clear_directory(dir)
     Path(dir).mkdir()
     if pl:
         Path(dir / "target scores").mkdir(parents=True)
-
+    target_pages = target_pages.lower()
     make_summary_page(tl, pl, other_files, dir)
-    make_target_list(tl, pl, other_files, dir)
-    make_numerical_scores_pages(tl, pl, other_files, dir)
+    make_target_list(tl, pl, other_files, dir, target_pages == "local")
+    make_numerical_scores_pages(tl, pl, other_files, dir, target_pages == "local")
     make_categorical_scores(tl, pl, other_files, dir)
-    # if subdir == "targets":
-    make_target_pages(tl, pl, other_files, dir)
+    match target_pages:
+        case "main":
+            make_target_pages(tl, dir, True)
+        case "local":
+            make_target_pages(tl, dir, False)
+        case _:
+            pass
 
 
 def html_to_pdf(input_html_path, output_pdf_path):
@@ -792,14 +824,12 @@ def html_to_pdf(input_html_path, output_pdf_path):
         # Letter size in pixels at 96 DPI: 8.5 x 11 inches → 816 x 1056
         page.set_viewport_size({"width": 816, "height": 1056})
         page.set_content(html_content)
-        page.evaluate(
-            """
+        page.evaluate("""
             const table = document.querySelector('table.dataTable');
             if (table) {
                 table.style.fontSize = 'small';
             }
-        """
-        )
+        """)
         page.pdf(
             path=output_pdf_path,
             scale=0.8,
