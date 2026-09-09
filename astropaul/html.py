@@ -493,12 +493,20 @@ def make_numerical_scores_pages(
                     )
                     d += tags.p(util.raw(dataframe_to_datatable(tt, "Target_Scores", table_options=table_options)))
                     if i > 0:
-                        d.head += tags.a("<-Prev Day", href=f"Target Scores {target} {start_times[i - 1]}.html", id="prevDay")
+                        d.head += tags.a(
+                            "<-Prev Day",
+                            href=f'Target Scores {target} {start_times[i - 1].strftime("%Y-%m-%d")}.html',
+                            id="prevDay",
+                        )
                     else:
                         d.head += tags.span("<-Prev Day")
                     d.head += horizontal_space()
                     if i < len(start_times) - 1:
-                        d.head += tags.a("Next Day->", href=f"Target Scores {target} {start_times[i + 1]}.html", id="nextDay")
+                        d.head += tags.a(
+                            "Next Day->",
+                            href=f'Target Scores {target} {start_times[i + 1].strftime("%Y-%m-%d")}.html',
+                            id="nextDay",
+                        )
                     else:
                         d.head += tags.span("Next Day->")
                     d.head += horizontal_space()
@@ -615,7 +623,7 @@ def make_target_pages(tl: tlc.TargetList, dir: str = "html", is_main: bool = Fal
     # do special things if certain resources are present
     pepsi_table = "PEPSI Observations"
     cd_stats = collections.defaultdict(set)
-    if pepsi_table in tl.other_lists and "PEPSI SpectrumPlot" in tl.other_lists[pepsi_table].columns:
+    if pepsi_table in tl.other_lists and "PEPSI SpectrumPlot" in tl.other_lists[pepsi_table].columns and is_main:
         pepsi_observations = tl.other_lists[pepsi_table]
         columns_to_skip[pepsi_table] = ["PEPSI SpectrumPlot"]
         spectra_dir = Path(dir) / "spectrum_plots"
@@ -661,19 +669,20 @@ def make_target_pages(tl: tlc.TargetList, dir: str = "html", is_main: bool = Fal
     }
     # if spectral observations are present, add: links to plot in table, page w/ carousel of all plots
     # TODO: this code permanently alters the observations table, it should instead modify a copy of it, leaving original intact
-    resources_dir = resources_path()
-    spectroscopy_observations = [("PEPSI Observations", "PEPSI SpectrumPlot")]  # (table, plot column name)
-    for table_name, column_name in spectroscopy_observations:
-        if table_name in other_tables and column_name in other_tables[table_name].columns:
-            # add the link in the table
-            table = other_tables[table_name]
-            if not "Plot" in table.columns:
-                for plot_resource in table[column_name]:
-                    shutil.copy(resources_dir / plot_resource, spectra_dir)
-                table["Plot"] = [
-                    f'<a href="file://{spectra_dir / Path(file).name}" target="_blank">Plot</a>' for file in table[column_name]
-                ]
-                # observations.drop(column_name, axis=1, inplace=True)
+    if is_main:
+        resources_dir = resources_path()
+        spectroscopy_observations = [("PEPSI Observations", "PEPSI SpectrumPlot")]  # (table, plot column name)
+        for table_name, column_name in spectroscopy_observations:
+            if table_name in other_tables and column_name in other_tables[table_name].columns:
+                # add the link in the table
+                table = other_tables[table_name]
+                if not "Plot" in table.columns:
+                    for plot_resource in table[column_name]:
+                        shutil.copy(resources_dir / plot_resource, spectra_dir)
+                    table["Plot"] = [
+                        f'<a href="file://{spectra_dir / Path(file).name}" target="_blank">Plot</a>' for file in table[column_name]
+                    ]
+                    # observations.drop(column_name, axis=1, inplace=True)
 
     # make pages for each individual target
     Path(dir / "targets").mkdir(exist_ok=True)
