@@ -41,7 +41,7 @@ def db_style_to_string(name: str) -> str:
     answer = name.replace("_", " ")
     answer = answer.title()
     # handle terms that should be all caps
-    for string in ["Jd", "Utc", "Id", "Dssi", "Ra", "Hms", "Dms", "Pepsi", "Rv", "Pm", "Dr3", "WDS", "WDS ID"]:
+    for string in ["Jd", "Utc", "Id", "Dssi", "Ra", "Hms", "Dms", "Pepsi", "Rv", "Pm", "Dr3", "WDS", "WDS ID", "Ruwe"]:
         answer = answer.replace(string, string.upper())
     # handle terms with unique capitalization
     special_cases = [("Zorroalopeke", "ZorroAlopeke"), ("Spectrumplot", "SpectrumPlot"), ("Hrcam", "HRCam")]
